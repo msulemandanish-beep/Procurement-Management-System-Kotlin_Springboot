@@ -1,0 +1,14 @@
+spring:
+  data:
+    mongodb:
+      uri: ${MONGODB_URI}
+
+logging:
+  level:
+    com.company.procurement: INFO
+    org.springframework.security: WARN
+
+server:
+  error:
+    include-message: never
+    include-binding-errors: never

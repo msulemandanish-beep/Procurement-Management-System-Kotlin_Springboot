@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: procurement-management-system
+  profiles:
+    active: dev
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/procurement_db}
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-message: always
+    include-binding-errors: always
+
+jwt:
+  secret: ${JWT_SECRET:ThisIsASecretKeyForProcurementManagementSystemThatMustBeAtLeast256BitsLong}
+  expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+
+logging:
+  level:
+    root: INFO
+    com.company.procurement: DEBUG

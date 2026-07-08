@@ -1,0 +1,9 @@
+spring:
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/procurement_db_dev}
+
+logging:
+  level:
+    com.company.procurement: DEBUG
+    org.springframework.security: DEBUG
