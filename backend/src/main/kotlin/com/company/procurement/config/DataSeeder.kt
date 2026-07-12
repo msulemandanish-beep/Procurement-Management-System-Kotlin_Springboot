@@ -1,38 +1,69 @@
 package com.company.procurement.config
 
+import com.company.procurement.model.ApprovalDecision
+import com.company.procurement.model.ApprovalHistory
+import com.company.procurement.model.ApprovalLevel
+import com.company.procurement.model.Department
+import com.company.procurement.model.GoodsReceipt
+import com.company.procurement.model.GoodsReceiptItem
+import com.company.procurement.model.GoodsReceiptStatus
+import com.company.procurement.model.InspectionStatus
+import com.company.procurement.model.Priority
 import com.company.procurement.model.Product
+import com.company.procurement.model.PurchaseOrder
+import com.company.procurement.model.PurchaseOrderItem
+import com.company.procurement.model.PurchaseOrderStatus
+import com.company.procurement.model.PurchaseOrderTimelineEntry
+import com.company.procurement.model.PurchaseRequest
+import com.company.procurement.model.PurchaseRequestItem
+import com.company.procurement.model.PurchaseRequestStatus
 import com.company.procurement.model.Role
 import com.company.procurement.model.Supplier
 import com.company.procurement.model.SupplierStatus
 import com.company.procurement.model.User
+import com.company.procurement.repository.ApprovalHistoryRepository
+import com.company.procurement.repository.DepartmentRepository
+import com.company.procurement.repository.GoodsReceiptRepository
 import com.company.procurement.repository.ProductRepository
+import com.company.procurement.repository.PurchaseOrderRepository
+import com.company.procurement.repository.PurchaseRequestRepository
 import com.company.procurement.repository.SupplierRepository
 import com.company.procurement.repository.UserRepository
 import org.slf4j.LoggerFactory
 import org.springframework.boot.CommandLineRunner
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Component
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 @Component
 class DataSeeder(
     private val userRepository: UserRepository,
     private val productRepository: ProductRepository,
     private val supplierRepository: SupplierRepository,
+    private val departmentRepository: DepartmentRepository,
+    private val purchaseRequestRepository: PurchaseRequestRepository,
+    private val approvalHistoryRepository: ApprovalHistoryRepository,
+    private val purchaseOrderRepository: PurchaseOrderRepository,
+    private val goodsReceiptRepository: GoodsReceiptRepository,
     private val passwordEncoder: PasswordEncoder
 ) : CommandLineRunner {
 
     private val logger = LoggerFactory.getLogger(DataSeeder::class.java)
 
     override fun run(vararg args: String?) {
-        seedUsers()
+        val users = seedUsers()
+        seedDepartments()
         val supplierIds = seedSuppliers()
-        seedProducts(supplierIds)
+        val products = seedProducts(supplierIds)
+        seedProcurementWorkflowDemo(users, products)
     }
 
-    private fun seedUsers() {
-        if (userRepository.count() > 0) {
+    private fun seedUsers(): Map<String, User> {
+        val existingUsers = userRepository.findAll().associateBy { it.email }
+        if (existingUsers.isNotEmpty()) {
             logger.info("Users already seeded. Skipping user seed data.")
-            return
+            return existingUsers
         }
 
         val admin = User(
@@ -53,6 +84,24 @@ class DataSeeder(
             active = true
         )
 
+        val procurementManager = User(
+            firstName = "Imran",
+            lastName = "Chaudhry",
+            email = "procurementmanager@procurement.com",
+            password = passwordEncoder.encode("Procurement@123"),
+            role = Role.PROCUREMENT_MANAGER,
+            active = true
+        )
+
+        val financeManager = User(
+            firstName = "Ayesha",
+            lastName = "Farooq",
+            email = "financemanager@procurement.com",
+            password = passwordEncoder.encode("Finance@123"),
+            role = Role.FINANCE_MANAGER,
+            active = true
+        )
+
         val employee = User(
             firstName = "Usman",
             lastName = "Employee",
@@ -62,8 +111,30 @@ class DataSeeder(
             active = true
         )
 
-        userRepository.saveAll(listOf(admin, storeManager, employee))
-        logger.info("Seeded default users: admin@procurement.com, storemanager@procurement.com, employee@procurement.com")
+        val saved = userRepository.saveAll(listOf(admin, storeManager, procurementManager, financeManager, employee))
+        logger.info(
+            "Seeded default users: admin@procurement.com, storemanager@procurement.com, " +
+                "procurementmanager@procurement.com, financemanager@procurement.com, employee@procurement.com"
+        )
+        return saved.associateBy { it.email }
+    }
+
+    private fun seedDepartments() {
+        if (departmentRepository.count() > 0) {
+            logger.info("Departments already seeded. Skipping department seed data.")
+            return
+        }
+
+        val departments = listOf(
+            Department(name = "Information Technology", code = "IT", description = "Manages hardware, software, and infrastructure"),
+            Department(name = "Procurement", code = "PROC", description = "Handles sourcing and supplier relationships"),
+            Department(name = "Finance", code = "FIN", description = "Manages budgets and financial approvals"),
+            Department(name = "Operations", code = "OPS", description = "Day-to-day operational support"),
+            Department(name = "Human Resources", code = "HR", description = "Employee and workplace administration")
+        )
+
+        departmentRepository.saveAll(departments)
+        logger.info("Seeded ${departments.size} default departments")
     }
 
     /**
@@ -189,10 +260,11 @@ class DataSeeder(
         return idsByCompanyName
     }
 
-    private fun seedProducts(supplierIdsByCompanyName: Map<String, String>) {
-        if (productRepository.count() > 0) {
+    private fun seedProducts(supplierIdsByCompanyName: Map<String, String>): Map<String, Product> {
+        val existingProducts = productRepository.findAll()
+        if (existingProducts.isNotEmpty()) {
             logger.info("Products already seeded. Skipping product seed data.")
-            return
+            return existingProducts.associateBy { it.name }
         }
 
         val abcOfficeSupplies = supplierIdsByCompanyName.getValue("ABC Office Supplies")
@@ -274,8 +346,316 @@ class DataSeeder(
             )
         )
 
-        productRepository.saveAll(products)
-        logger.info("Seeded ${products.size} default products")
+        val saved = productRepository.saveAll(products)
+        logger.info("Seeded ${saved.size} default products")
+        return saved.associateBy { it.name }
+    }
+
+    /**
+     * Seeds a complete, realistic procurement workflow so the system demonstrates
+     * every stage end-to-end: a fully completed PR -> PO -> GRN cycle (which also
+     * increases inventory), a request pending Store Manager approval, a rejected
+     * request, and a high-value request currently awaiting Finance Manager approval.
+     * Safe to re-run: skipped entirely if any purchase request already exists.
+     */
+    private fun seedProcurementWorkflowDemo(users: Map<String, User>, products: Map<String, Product>) {
+        if (purchaseRequestRepository.count() > 0) {
+            logger.info("Purchase requests already seeded. Skipping procurement workflow demo data.")
+            return
+        }
+
+        val employee = users["employee@procurement.com"] ?: return
+        val storeManager = users["storemanager@procurement.com"] ?: return
+        val procurementManager = users["procurementmanager@procurement.com"] ?: return
+
+        val laptop = products["Laptop - Dell Latitude 5440"] ?: return
+        val officeChair = products["Office Chair - Ergonomic"] ?: return
+        val externalHardDrive = products["External Hard Drive 1TB"] ?: return
+        val ledMonitor = products["LED Monitor 24-inch"] ?: return
+
+        val now = Instant.now()
+
+        // ---- PR-0001: fully completed workflow (approved -> PO -> GRN -> stock increased) ----
+        val pr1Items = listOf(
+            PurchaseRequestItem(
+                productId = laptop.id ?: "",
+                productName = laptop.name,
+                requestedQuantity = 3,
+                estimatedUnitPrice = laptop.unitPrice,
+                notes = "Replacement laptops for new IT hires"
+            )
+        )
+        val pr1 = purchaseRequestRepository.save(
+            PurchaseRequest(
+                prNumber = "PR-0001",
+                employeeId = employee.id ?: "",
+                employeeName = "${employee.firstName} ${employee.lastName}",
+                department = "Information Technology",
+                items = pr1Items,
+                purpose = "Onboarding new IT department hires",
+                businessJustification = "Three new engineers joining next month require laptops",
+                priority = Priority.HIGH,
+                requiredDate = now.plus(14, ChronoUnit.DAYS),
+                status = PurchaseRequestStatus.CONVERTED_TO_PO,
+                currentApprovalLevel = null,
+                createdBy = employee.email,
+                updatedBy = procurementManager.email,
+                createdAt = now.minus(10, ChronoUnit.DAYS),
+                updatedAt = now.minus(6, ChronoUnit.DAYS)
+            )
+        )
+
+        approvalHistoryRepository.saveAll(
+            listOf(
+                ApprovalHistory(
+                    purchaseRequestId = pr1.id ?: "",
+                    prNumber = pr1.prNumber,
+                    level = ApprovalLevel.STORE_MANAGER,
+                    approverId = storeManager.id ?: "",
+                    approverName = "${storeManager.firstName} ${storeManager.lastName}",
+                    decision = ApprovalDecision.APPROVED,
+                    comments = "Stock confirmed unavailable, approved for procurement",
+                    timestamp = now.minus(9, ChronoUnit.DAYS)
+                ),
+                ApprovalHistory(
+                    purchaseRequestId = pr1.id ?: "",
+                    prNumber = pr1.prNumber,
+                    level = ApprovalLevel.PROCUREMENT_MANAGER,
+                    approverId = procurementManager.id ?: "",
+                    approverName = "${procurementManager.firstName} ${procurementManager.lastName}",
+                    decision = ApprovalDecision.APPROVED,
+                    comments = "Approved, within budget threshold",
+                    timestamp = now.minus(8, ChronoUnit.DAYS)
+                )
+            )
+        )
+
+        val po1ItemInitial = PurchaseOrderItem(
+            productId = laptop.id ?: "",
+            productName = laptop.name,
+            orderedQuantity = 3,
+            unitPrice = laptop.unitPrice,
+            taxRate = 5.0,
+            discount = 0.0,
+            receivedQuantity = 3
+        )
+        val po1Subtotal = po1ItemInitial.lineSubtotal
+        val po1Tax = po1ItemInitial.lineTax
+        val po1GrandTotal = (po1Subtotal - po1ItemInitial.discount) + po1Tax
+
+        val po1 = purchaseOrderRepository.save(
+            PurchaseOrder(
+                poNumber = "PO-0001",
+                purchaseRequestId = pr1.id ?: "",
+                prNumber = pr1.prNumber,
+                supplierId = laptop.supplierId,
+                supplierName = "Tech Solutions Ltd",
+                supplierContact = "Ahmed Raza",
+                items = listOf(po1ItemInitial),
+                subtotal = po1Subtotal,
+                taxTotal = po1Tax,
+                discountTotal = po1ItemInitial.discount,
+                shipping = 25.0,
+                grandTotal = po1GrandTotal + 25.0,
+                currency = "USD",
+                expectedDeliveryDate = now.minus(3, ChronoUnit.DAYS),
+                status = PurchaseOrderStatus.COMPLETED,
+                timeline = listOf(
+                    PurchaseOrderTimelineEntry(
+                        status = PurchaseOrderStatus.DRAFT,
+                        remarks = "Purchase Order created from purchase request PR-0001",
+                        actorId = procurementManager.id ?: "",
+                        actorName = "${procurementManager.firstName} ${procurementManager.lastName}",
+                        timestamp = now.minus(8, ChronoUnit.DAYS)
+                    ),
+                    PurchaseOrderTimelineEntry(
+                        status = PurchaseOrderStatus.ISSUED,
+                        remarks = "Purchase Order issued to supplier",
+                        actorId = procurementManager.id ?: "",
+                        actorName = "${procurementManager.firstName} ${procurementManager.lastName}",
+                        timestamp = now.minus(7, ChronoUnit.DAYS)
+                    ),
+                    PurchaseOrderTimelineEntry(
+                        status = PurchaseOrderStatus.COMPLETED,
+                        remarks = "Purchase Order fully received and completed",
+                        actorId = storeManager.id ?: "",
+                        actorName = "${storeManager.firstName} ${storeManager.lastName}",
+                        timestamp = now.minus(6, ChronoUnit.DAYS)
+                    )
+                ),
+                createdBy = procurementManager.email,
+                updatedBy = storeManager.email,
+                createdAt = now.minus(8, ChronoUnit.DAYS),
+                updatedAt = now.minus(6, ChronoUnit.DAYS)
+            )
+        )
+
+        goodsReceiptRepository.save(
+            GoodsReceipt(
+                grnNumber = "GRN-0001",
+                purchaseOrderId = po1.id ?: "",
+                poNumber = po1.poNumber,
+                supplierId = po1.supplierId,
+                supplierName = po1.supplierName,
+                items = listOf(
+                    GoodsReceiptItem(
+                        productId = laptop.id ?: "",
+                        productName = laptop.name,
+                        receivedQuantity = 3,
+                        rejectedQuantity = 0,
+                        batchNumber = "BATCH-2026-001"
+                    )
+                ),
+                warehouse = "Main Warehouse",
+                storageLocation = "Rack A1",
+                receivedBy = storeManager.email,
+                receivedDate = now.minus(6, ChronoUnit.DAYS),
+                inspectionStatus = InspectionStatus.PASSED,
+                qualityNotes = "All units inspected and in good condition",
+                status = GoodsReceiptStatus.COMPLETED,
+                createdAt = now.minus(6, ChronoUnit.DAYS)
+            )
+        )
+
+        // The GRN above is the only stock-increasing event in the system, so we
+        // apply it here exactly as GoodsReceiptService would: laptop stock 0 -> 3.
+        val updatedLaptop = laptop.copy(
+            currentStock = laptop.currentStock + 3,
+            status = Product.deriveStatus(laptop.currentStock + 3, laptop.minimumStock),
+            updatedAt = now.minus(6, ChronoUnit.DAYS)
+        )
+        productRepository.save(updatedLaptop)
+
+        // ---- PR-0002: awaiting Store Manager approval ----
+        purchaseRequestRepository.save(
+            PurchaseRequest(
+                prNumber = "PR-0002",
+                employeeId = employee.id ?: "",
+                employeeName = "${employee.firstName} ${employee.lastName}",
+                department = "Operations",
+                items = listOf(
+                    PurchaseRequestItem(
+                        productId = officeChair.id ?: "",
+                        productName = officeChair.name,
+                        requestedQuantity = 10,
+                        estimatedUnitPrice = officeChair.unitPrice,
+                        notes = "New workstations for the operations floor"
+                    )
+                ),
+                purpose = "Furnishing new operations workstations",
+                businessJustification = "Ten new hires starting next quarter need seating",
+                priority = Priority.MEDIUM,
+                requiredDate = now.plus(30, ChronoUnit.DAYS),
+                status = PurchaseRequestStatus.SUBMITTED,
+                currentApprovalLevel = ApprovalLevel.STORE_MANAGER,
+                createdBy = employee.email,
+                createdAt = now.minus(2, ChronoUnit.DAYS),
+                updatedAt = now.minus(2, ChronoUnit.DAYS)
+            )
+        )
+
+        // ---- PR-0003: rejected at Store Manager stage ----
+        val pr3 = purchaseRequestRepository.save(
+            PurchaseRequest(
+                prNumber = "PR-0003",
+                employeeId = employee.id ?: "",
+                employeeName = "${employee.firstName} ${employee.lastName}",
+                department = "Information Technology",
+                items = listOf(
+                    PurchaseRequestItem(
+                        productId = externalHardDrive.id ?: "",
+                        productName = externalHardDrive.name,
+                        requestedQuantity = 5,
+                        estimatedUnitPrice = externalHardDrive.unitPrice
+                    ),
+                    PurchaseRequestItem(
+                        productId = ledMonitor.id ?: "",
+                        productName = ledMonitor.name,
+                        requestedQuantity = 4,
+                        estimatedUnitPrice = ledMonitor.unitPrice
+                    )
+                ),
+                purpose = "Additional backup drives and monitors",
+                businessJustification = "Requested for personal desk setup preference",
+                priority = Priority.LOW,
+                requiredDate = now.plus(20, ChronoUnit.DAYS),
+                status = PurchaseRequestStatus.REJECTED,
+                currentApprovalLevel = null,
+                createdBy = employee.email,
+                updatedBy = storeManager.email,
+                createdAt = now.minus(5, ChronoUnit.DAYS),
+                updatedAt = now.minus(4, ChronoUnit.DAYS)
+            )
+        )
+
+        approvalHistoryRepository.save(
+            ApprovalHistory(
+                purchaseRequestId = pr3.id ?: "",
+                prNumber = pr3.prNumber,
+                level = ApprovalLevel.STORE_MANAGER,
+                approverId = storeManager.id ?: "",
+                approverName = "${storeManager.firstName} ${storeManager.lastName}",
+                decision = ApprovalDecision.REJECTED,
+                comments = "Not a business-critical requirement; existing equipment is sufficient",
+                timestamp = now.minus(4, ChronoUnit.DAYS)
+            )
+        )
+
+        // ---- PR-0004: high-value request awaiting Finance Manager approval ----
+        val pr4 = purchaseRequestRepository.save(
+            PurchaseRequest(
+                prNumber = "PR-0004",
+                employeeId = employee.id ?: "",
+                employeeName = "${employee.firstName} ${employee.lastName}",
+                department = "Finance",
+                items = listOf(
+                    PurchaseRequestItem(
+                        productId = laptop.id ?: "",
+                        productName = laptop.name,
+                        requestedQuantity = 10,
+                        estimatedUnitPrice = laptop.unitPrice,
+                        notes = "Department-wide laptop refresh"
+                    )
+                ),
+                purpose = "Annual laptop refresh for the finance department",
+                businessJustification = "Existing laptops are past end-of-life and impacting productivity",
+                priority = Priority.HIGH,
+                requiredDate = now.plus(45, ChronoUnit.DAYS),
+                status = PurchaseRequestStatus.UNDER_REVIEW,
+                currentApprovalLevel = ApprovalLevel.FINANCE_MANAGER,
+                createdBy = employee.email,
+                updatedBy = procurementManager.email,
+                createdAt = now.minus(3, ChronoUnit.DAYS),
+                updatedAt = now.minus(1, ChronoUnit.DAYS)
+            )
+        )
+
+        approvalHistoryRepository.saveAll(
+            listOf(
+                ApprovalHistory(
+                    purchaseRequestId = pr4.id ?: "",
+                    prNumber = pr4.prNumber,
+                    level = ApprovalLevel.STORE_MANAGER,
+                    approverId = storeManager.id ?: "",
+                    approverName = "${storeManager.firstName} ${storeManager.lastName}",
+                    decision = ApprovalDecision.APPROVED,
+                    comments = "Confirmed need across the finance team",
+                    timestamp = now.minus(2, ChronoUnit.DAYS)
+                ),
+                ApprovalHistory(
+                    purchaseRequestId = pr4.id ?: "",
+                    prNumber = pr4.prNumber,
+                    level = ApprovalLevel.PROCUREMENT_MANAGER,
+                    approverId = procurementManager.id ?: "",
+                    approverName = "${procurementManager.firstName} ${procurementManager.lastName}",
+                    decision = ApprovalDecision.APPROVED,
+                    comments = "Supplier availability confirmed, forwarding to Finance due to value",
+                    timestamp = now.minus(1, ChronoUnit.DAYS)
+                )
+            )
+        )
+
+        logger.info("Seeded a complete procurement workflow demo: PR-0001..PR-0004, PO-0001, GRN-0001")
     }
 
     private data class SupplierSeed(

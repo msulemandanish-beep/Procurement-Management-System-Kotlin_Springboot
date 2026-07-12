@@ -1,36 +1,89 @@
-# Procurement Management System — Phase 1 + Phase 2: Inventory & Supplier Management
+# Procurement Management System
 
-A production-ready Kotlin + Spring Boot + MongoDB backend implementing the Inventory Management module (Phase 1) and the Supplier Management module (Phase 2) of a larger Procurement Management System. Built with clean architecture, JWT authentication, role-based access control, and full OpenAPI documentation.
+A production-ready, enterprise-grade procurement backend built with Kotlin, Spring Boot, and MongoDB. The system covers the full procurement lifecycle — from inventory and supplier management through purchase requests, multi-level approvals, purchase orders, and goods receipt — with JWT authentication, role-based access control, and complete OpenAPI documentation.
 
 ## 1. Project Overview
 
-This service manages users, products, inventory levels, stock issuance to employees, dashboard statistics, procurement recommendations, and — as of Phase 2 — suppliers. Every product now references a preferred supplier, so the dashboard, product catalog, and procurement recommendations all reflect where stock should be replenished from. The codebase is designed so future modules (Purchase Requests, Purchase Orders, Approvals, Reports, Notifications) can be added without restructuring existing code.
+This service is the backend for a Procurement Management System designed for medium and large organizations. It has been built incrementally across six phases, and every phase remains fully functional and backward compatible with the ones before it:
 
-### What's new in Phase 2
+| Phase | Module | Status |
+|---|---|---|
+| 1 | Inventory Management (Users, Products, Inventory, Stock Issues, Dashboard) | ✅ Complete |
+| 2 | Supplier Management | ✅ Complete |
+| 3 | Purchase Request Management | ✅ Complete |
+| 4 | Approval Workflow | ✅ Complete |
+| 5 | Purchase Order Management | ✅ Complete |
+| 6 | Goods Receipt (GRN) | ✅ Complete |
 
-- Full **Supplier Management** module: CRUD, activation/deactivation, search, and statistics
-- Auto-generated, unique supplier codes (`SUP-0001`, `SUP-0002`, ...)
-- `Product` now requires a `supplierId`; the API validates the supplier exists and embeds a lightweight `supplier` summary object in every `ProductResponse`
-- Dashboard extended with `totalSuppliers`, `activeSuppliers`, and `inactiveSuppliers`
-- Data seeder extended with 5 realistic suppliers, and all seeded products now reference one
-- Postman collection extended with a "Supplier Management" folder
-- All Phase 1 functionality (Auth, Users, Products, Inventory, Stock Issues, Dashboard) is unchanged and fully backward compatible aside from the new required `supplierId` field on Product create/update requests
+### The end-to-end business flow
+
+```
+Supplier ──▶ Product ──▶ Inventory
+                              │
+                              ▼
+                    Purchase Request (Employee)
+                              │
+                              ▼
+                    Approval Workflow (multi-level)
+                              │
+                              ▼
+                    Purchase Order (to Supplier)
+                              │
+                              ▼
+                    Goods Receipt (GRN)
+                              │
+                              ▼
+                    Inventory stock increased
+```
+
+**Critical invariant: Goods Receipt is the ONLY module in the entire system that increases `Product.currentStock`.** Every other module — Purchase Requests, Approvals, Purchase Orders — only plans, approves, and orders. Stock Issue (Phase 1) is still the only module that *decreases* stock.
 
 ## 2. Features
 
+**Phase 1 — Inventory Management**
 - JWT-based authentication with BCrypt password hashing
-- Role-based access control: `ADMIN`, `STORE_MANAGER`, `EMPLOYEE`
-- Full CRUD for Users, Products, and Suppliers
+- Full CRUD for Users and Products
 - Automatic stock status derivation (`IN_STOCK`, `LOW_STOCK`, `OUT_OF_STOCK`)
 - Stock issuance and return workflow with automatic stock adjustment
-- Supplier management with auto-generated supplier codes, activation/deactivation, and search
-- Every product links to its preferred supplier; product responses embed a supplier summary
-- Dashboard statistics aggregation, including supplier counts
 - Procurement recommendation engine (products below minimum stock)
+
+**Phase 2 — Supplier Management**
+- Supplier CRUD with auto-generated supplier codes (`SUP-0001`, ...)
+- Activation/deactivation, search, and statistics
+- Every product links to a preferred supplier; product responses embed a supplier summary
+
+**Phase 3 — Purchase Request Management**
+- Employees create, update, submit, and cancel purchase requests with multiple line items
+- Auto-generated PR numbers (`PR-0001`, ...)
+- Search/filter by status, employee, department, and priority
+- Priority levels including `EMERGENCY`, which bypasses the normal approval workflow
+
+**Phase 4 — Approval Workflow**
+- Configurable multi-level sequence: Store Manager → Procurement Manager → Finance Manager
+- Finance Manager approval is only required above a configurable high-value threshold
+- Full approval history with approver identity, decision, comments, and timestamp
+- ADMIN override to approve immediately, bypassing the normal sequence
+- Guards against duplicate approvals and approving cancelled requests
+
+**Phase 5 — Purchase Order Management**
+- Converts an APPROVED purchase request into a Purchase Order
+- Auto-generated PO numbers (`PO-0001`, ...)
+- Supplier is derived automatically from the ordered product; ADMIN can override it
+- Automatic subtotal, tax, discount, and grand total calculation
+- Full status lifecycle (`DRAFT` → `ISSUED`/`EMAIL_SENT` → `PARTIALLY_RECEIVED`/`COMPLETED`, or `CANCELLED`) with a timeline of every transition
+
+**Phase 6 — Goods Receipt (GRN)**
+- Records goods received against a Purchase Order, including batch numbers, serial numbers, expiry dates, warehouse, and storage location
+- Supports partial deliveries and multiple receipts against a single Purchase Order
+- Automatically increases inventory for accepted quantities and closes the Purchase Order once fully received
+- Inspection status and quality notes for basic quality control
+
+**Cross-cutting**
+- Role-based access control across five roles: `ADMIN`, `STORE_MANAGER`, `PROCUREMENT_MANAGER`, `FINANCE_MANAGER`, `EMPLOYEE`
 - Centralized exception handling with standardized error responses
-- Request validation via Bean Validation
+- Request validation via Bean Validation throughout
 - OpenAPI/Swagger documentation for every endpoint
-- Startup seed data (Admin, Store Manager, Employee, 5 suppliers, sample products linked to suppliers)
+- Startup seed data demonstrating the complete procurement workflow end-to-end
 
 ## 3. Technologies
 
@@ -46,7 +99,7 @@ This service manages users, products, inventory levels, stock issuance to employ
 
 ## 4. Architecture
 
-Clean, layered architecture — each layer only depends on the layer beneath it:
+Clean, layered architecture — each layer only depends on the layer beneath it. This has not changed since Phase 1; every new module (Purchase Requests, Approvals, Purchase Orders, Goods Receipt) was added using the exact same pattern.
 
 ```
 Controller  →  Service  →  Repository  →  MongoDB
@@ -66,12 +119,13 @@ GlobalExceptionHandler (cross-cutting)
                           ▼
                 ┌────────────────────┐
                 │    Controller      │  validates request DTO,
-                │  (@RestController) │  delegates to Service
+                │  (@RestController) │  delegates to Service,
+                │                    │  enforces @PreAuthorize role checks
                 └─────────┬──────────┘
                           ▼
                 ┌────────────────────┐
-                │      Service       │  business logic,
-                │                    │  domain rules, exceptions
+                │      Service       │  business logic, workflow rules,
+                │                    │  domain exceptions
                 └─────────┬──────────┘
                           ▼
                 ┌────────────────────┐
@@ -84,21 +138,35 @@ GlobalExceptionHandler (cross-cutting)
                    └─────────────┘
 ```
 
-### Supplier ↔ Product ↔ Inventory relationship
-
-Suppliers do **not** touch inventory quantities directly. The relationship is intentionally one-directional so future modules (Purchase Orders, Goods Receipt) can slot in cleanly:
+### Database relationships (full procurement lifecycle)
 
 ```
 Supplier ──supplies──▶ Product ──has──▶ Inventory (stock levels)
                                               │
                                               ▼
-                          (future) Purchase Order ──▶ Goods Receipt ──▶ increases stock
+                                   Purchase Request (Employee)
+                                              │
+                                     Approval Workflow
+                                    (STORE_MANAGER → PROCUREMENT_MANAGER
+                                     → FINANCE_MANAGER if high value)
+                                              │
+                                              ▼
+                                     Purchase Order ──▶ Supplier
+                                              │
+                                              ▼
+                                     Goods Receipt (GRN)
+                                              │
+                                              ▼
+                                  Inventory stock increased
+                                  (ONLY module allowed to do this)
 ```
 
-- `Product.supplierId` references the preferred supplier for that product.
-- `ProductService` validates the referenced supplier exists on every create/update and embeds a `SupplierSummary` (`id`, `supplierCode`, `companyName`) in every `ProductResponse` — the frontend never needs a second request just to show which supplier a product comes from.
-- `InventoryService` and `StockIssueService` are untouched by this change — they continue to operate purely on stock quantities and know nothing about suppliers.
-- Later, Purchase Orders will reference `supplierId` directly, and Goods Receipt will be the only thing that increases `Product.currentStock`.
+- `Product.supplierId` references the preferred supplier for that product; `ProductService` validates the supplier exists and embeds a `SupplierSummary` in every `ProductResponse`.
+- `PurchaseRequest.items` embeds a snapshot of each requested product (id, name, quantity, estimated price) — the request survives even if the underlying product is later changed.
+- `PurchaseRequest.currentApprovalLevel` tracks which role must act next; it is `null` once the request reaches a terminal state.
+- `ApprovalHistory` is an append-only audit trail, one document per decision, linked to its `PurchaseRequest` by id.
+- `PurchaseOrder.items` tracks `receivedQuantity` per line so partial deliveries and multiple Goods Receipts against a single PO are supported.
+- `GoodsReceipt` is the only writer of `Product.currentStock` increases anywhere in the codebase — enforced by convention (only `GoodsReceiptService` calls `ProductService.saveProduct` with an increased stock value) and documented here as an architectural invariant for anyone extending the system.
 
 ## 5. Request Flow
 
@@ -117,14 +185,21 @@ Supplier ──supplies──▶ Product ──has──▶ Inventory (stock lev
 4. The client stores the token and sends it as `Authorization: Bearer <token>` on subsequent requests.
 5. `JwtFilter` validates the token's signature and expiry on every request.
 
+Authentication itself has not changed since Phase 1 — only the set of possible `role` values has grown (see Role Matrix below).
+
 ## 7. MongoDB Collections
 
 | Collection | Purpose |
 |---|---|
-| `users` | Application users (Admin, Store Manager, Employee) |
+| `users` | Application users across all five roles |
 | `products` | Product catalog with stock levels; each document references a `supplierId` |
 | `stockIssues` | Records of stock issued to employees and returns |
 | `suppliers` | Supplier master data (contact info, address, payment terms, status) |
+| `departments` | Organizational departments used on purchase requests |
+| `purchaseRequests` | Employee purchase requests, embedded line items, and workflow state |
+| `approvalHistories` | Append-only audit trail of every approval decision |
+| `purchaseOrders` | Purchase orders issued to suppliers, embedded line items and status timeline |
+| `goodsReceipts` | Records of goods received against purchase orders |
 
 ## 8. Folder Structure
 
@@ -138,6 +213,7 @@ backend/
 ├── postman_collection.json
 ├── README.md
 ├── FRONTEND_HANDOFF.md
+├── SYSTEM_REPOTREE.md
 └── src/main/
     ├── kotlin/com/company/procurement/
     │   ├── ProcurementApplication.kt
@@ -152,7 +228,12 @@ backend/
     │   │   ├── InventoryController.kt
     │   │   ├── StockIssueController.kt
     │   │   ├── DashboardController.kt
-    │   │   └── SupplierController.kt
+    │   │   ├── SupplierController.kt
+    │   │   ├── DepartmentController.kt
+    │   │   ├── PurchaseRequestController.kt
+    │   │   ├── ApprovalController.kt
+    │   │   ├── PurchaseOrderController.kt
+    │   │   └── GoodsReceiptController.kt
     │   ├── service/
     │   │   ├── AuthService.kt
     │   │   ├── UserService.kt
@@ -160,30 +241,39 @@ backend/
     │   │   ├── InventoryService.kt
     │   │   ├── StockIssueService.kt
     │   │   ├── DashboardService.kt
-    │   │   └── SupplierService.kt
+    │   │   ├── SupplierService.kt
+    │   │   ├── DepartmentService.kt
+    │   │   ├── PurchaseRequestService.kt
+    │   │   ├── ApprovalService.kt
+    │   │   ├── PurchaseOrderService.kt
+    │   │   └── GoodsReceiptService.kt
     │   ├── repository/
     │   │   ├── UserRepository.kt
     │   │   ├── ProductRepository.kt
     │   │   ├── StockIssueRepository.kt
-    │   │   └── SupplierRepository.kt
+    │   │   ├── SupplierRepository.kt
+    │   │   ├── DepartmentRepository.kt
+    │   │   ├── PurchaseRequestRepository.kt
+    │   │   ├── ApprovalHistoryRepository.kt
+    │   │   ├── PurchaseOrderRepository.kt
+    │   │   └── GoodsReceiptRepository.kt
     │   ├── model/
-    │   │   ├── User.kt
-    │   │   ├── Product.kt
-    │   │   ├── StockIssue.kt
-    │   │   ├── Supplier.kt
-    │   │   ├── Role.kt
-    │   │   ├── ProductStatus.kt
-    │   │   ├── IssueStatus.kt
-    │   │   └── SupplierStatus.kt
+    │   │   ├── User.kt, Role.kt
+    │   │   ├── Product.kt, ProductStatus.kt
+    │   │   ├── StockIssue.kt, IssueStatus.kt
+    │   │   ├── Supplier.kt, SupplierStatus.kt
+    │   │   ├── Department.kt
+    │   │   ├── PurchaseRequest.kt, PurchaseRequestItem.kt, PurchaseRequestStatus.kt, Priority.kt
+    │   │   ├── ApprovalHistory.kt, ApprovalLevel.kt, ApprovalDecision.kt
+    │   │   ├── PurchaseOrder.kt, PurchaseOrderItem.kt, PurchaseOrderTimelineEntry.kt, PurchaseOrderStatus.kt
+    │   │   └── GoodsReceipt.kt, GoodsReceiptItem.kt, GoodsReceiptStatus.kt, InspectionStatus.kt
     │   ├── dto/
-    │   │   ├── auth/ (LoginRequest, LoginResponse)
-    │   │   ├── user/ (UserRequest, UserResponse)
-    │   │   ├── product/ (ProductRequest, ProductResponse)
-    │   │   ├── inventory/ (InventoryResponse, ProcurementRecommendationResponse)
-    │   │   ├── issue/ (IssueRequest, IssueResponse)
-    │   │   ├── dashboard/ (DashboardResponse)
-    │   │   ├── supplier/ (SupplierRequest, SupplierUpdateRequest, SupplierResponse, SupplierSummary, SupplierStatusUpdateRequest, SupplierSearchResponse, SupplierStatisticsResponse)
-    │   │   └── common/ (ErrorResponse)
+    │   │   ├── auth/, user/, product/, inventory/, issue/, dashboard/, supplier/, common/
+    │   │   ├── department/ (DepartmentRequest, DepartmentResponse)
+    │   │   ├── purchaserequest/ (PurchaseRequestRequest, PurchaseRequestUpdateRequest, PurchaseRequestResponse, item DTOs)
+    │   │   ├── approval/ (ApprovalDecisionRequest, ApprovalHistoryResponse)
+    │   │   ├── purchaseorder/ (PurchaseOrderCreateRequest, PurchaseOrderResponse, item/timeline DTOs)
+    │   │   └── goodsreceipt/ (GoodsReceiptCreateRequest, GoodsReceiptResponse, item DTOs)
     │   ├── security/
     │   │   ├── JwtProvider.kt
     │   │   ├── JwtFilter.kt
@@ -200,6 +290,8 @@ backend/
         ├── application-dev.yml
         └── application-prod.yml
 ```
+
+See `SYSTEM_REPOTREE.md` for a file-by-file explanation of the entire backend (and a suggested frontend structure).
 
 ## 9. Installation
 
@@ -219,7 +311,7 @@ backend/
 docker run -d --name procurement-mongo -p 27017:27017 mongo:7
 ```
 
-No manual schema setup is required — Spring Data MongoDB and the built-in `DataSeeder` create collections and seed data automatically on first startup.
+No manual schema setup is required — Spring Data MongoDB and the built-in `DataSeeder` create all nine collections and seed demo data automatically on first startup.
 
 ### Gradle Wrapper Note
 
@@ -283,7 +375,7 @@ Once the app is running, open:
 - Swagger UI: `http://localhost:8080/swagger-ui.html`
 - Raw OpenAPI spec: `http://localhost:8080/v3/api-docs`
 
-Use the **Authorize** button in Swagger UI and paste your JWT (without the `Bearer ` prefix — Swagger adds it) to test secured endpoints interactively.
+Use the **Authorize** button in Swagger UI and paste your JWT (without the `Bearer ` prefix — Swagger adds it) to test secured endpoints interactively. Every endpoint across all six phases is documented, including request/response schemas and role requirements.
 
 ## 14. Seeded Test Accounts
 
@@ -291,19 +383,20 @@ Use the **Authorize** button in Swagger UI and paste your JWT (without the `Bear
 |---|---|---|
 | ADMIN | admin@procurement.com | Admin@123 |
 | STORE_MANAGER | storemanager@procurement.com | Manager@123 |
+| PROCUREMENT_MANAGER | procurementmanager@procurement.com | Procurement@123 |
+| FINANCE_MANAGER | financemanager@procurement.com | Finance@123 |
 | EMPLOYEE | employee@procurement.com | Employee@123 |
 
-Seven sample products (including one out-of-stock and two low-stock items) are seeded automatically on first run, and five suppliers (`SUP-0001`–`SUP-0005`) are seeded before them so every product can reference a valid supplier:
+### What's seeded
 
-| Code | Company Name |
-|---|---|
-| SUP-0001 | ABC Office Supplies |
-| SUP-0002 | Tech Solutions Ltd |
-| SUP-0003 | Global Stationers |
-| SUP-0004 | Computer World |
-| SUP-0005 | Prime Electronics |
-
-Seeding is idempotent — re-running the app looks up suppliers by company name instead of creating duplicates, so restarts never produce duplicate suppliers or broken `supplierId` references.
+- 5 departments (IT, Procurement, Finance, Operations, HR)
+- 5 suppliers (`SUP-0001`–`SUP-0005`)
+- 7 products, each linked to a supplier
+- A **complete procurement workflow demo**, safe to re-run (idempotent — re-running the app looks up existing data instead of duplicating it):
+  - `PR-0001` → fully approved → converted to `PO-0001` → received via `GRN-0001` → **laptop stock increased from 0 to 3** (demonstrates the entire Phase 3–6 lifecycle)
+  - `PR-0002` → `SUBMITTED`, awaiting Store Manager approval
+  - `PR-0003` → `REJECTED` at the Store Manager stage
+  - `PR-0004` → high-value request (`$9,500`), already approved by Store Manager and Procurement Manager, currently `UNDER_REVIEW` awaiting **Finance Manager** approval (demonstrates the value-based escalation rule)
 
 ## 15. API List
 
@@ -315,244 +408,238 @@ Seeding is idempotent — re-running the app looks up suppliers by company name 
 ### Users
 | Method | Endpoint | Access |
 |---|---|---|
-| GET | `/api/users` | ADMIN |
-| GET | `/api/users/{id}` | ADMIN |
-| POST | `/api/users` | ADMIN |
-| PUT | `/api/users/{id}` | ADMIN |
-| DELETE | `/api/users/{id}` | ADMIN |
+| GET / GET {id} / POST / PUT {id} / DELETE {id} | `/api/users` | ADMIN |
 
 ### Products
 | Method | Endpoint | Access |
 |---|---|---|
-| GET | `/api/products` | ADMIN, STORE_MANAGER, EMPLOYEE |
-| GET | `/api/products/{id}` | ADMIN, STORE_MANAGER, EMPLOYEE |
-| POST | `/api/products` | ADMIN |
-| PUT | `/api/products/{id}` | ADMIN |
-| DELETE | `/api/products/{id}` | ADMIN |
+| GET, GET {id} | `/api/products` | All roles |
+| POST, PUT {id}, DELETE {id} | `/api/products` | ADMIN |
 
 ### Inventory
 | Method | Endpoint | Access |
 |---|---|---|
-| GET | `/api/inventory` | ADMIN, STORE_MANAGER |
-| GET | `/api/inventory/low-stock` | ADMIN, STORE_MANAGER |
-| GET | `/api/inventory/out-of-stock` | ADMIN, STORE_MANAGER |
-| GET | `/api/inventory/status` | ADMIN, STORE_MANAGER |
-| GET | `/api/inventory/procurement-recommendations` | ADMIN, STORE_MANAGER |
+| GET `/api/inventory`, `/low-stock`, `/out-of-stock`, `/status`, `/procurement-recommendations` | ADMIN, STORE_MANAGER |
 
 ### Stock Issues
 | Method | Endpoint | Access |
 |---|---|---|
-| GET | `/api/issues` | ADMIN, STORE_MANAGER |
-| GET | `/api/issues/history` | ADMIN, STORE_MANAGER |
-| POST | `/api/issues` | ADMIN, STORE_MANAGER |
-| PUT | `/api/issues/{id}/return` | ADMIN, STORE_MANAGER |
-
-### Dashboard
-| Method | Endpoint | Access |
-|---|---|---|
-| GET | `/api/dashboard` | ADMIN, STORE_MANAGER |
+| GET `/api/issues`, `/history`; POST `/api/issues`; PUT `/api/issues/{id}/return` | ADMIN, STORE_MANAGER |
 
 ### Suppliers
 | Method | Endpoint | Access |
 |---|---|---|
-| GET | `/api/suppliers` | ADMIN, STORE_MANAGER |
-| GET | `/api/suppliers/{id}` | ADMIN, STORE_MANAGER |
-| GET | `/api/suppliers/code/{supplierCode}` | ADMIN, STORE_MANAGER |
-| POST | `/api/suppliers` | ADMIN |
-| PUT | `/api/suppliers/{id}` | ADMIN |
-| DELETE | `/api/suppliers/{id}` | ADMIN |
-| PATCH | `/api/suppliers/{id}/activate` | ADMIN |
-| PATCH | `/api/suppliers/{id}/deactivate` | ADMIN |
-| GET | `/api/suppliers/search?keyword=` | ADMIN, STORE_MANAGER |
-| GET | `/api/suppliers/active` | ADMIN, STORE_MANAGER |
-| GET | `/api/suppliers/inactive` | ADMIN, STORE_MANAGER |
-| GET | `/api/suppliers/statistics` | ADMIN, STORE_MANAGER |
+| GET `/api/suppliers` (+ `/{id}`, `/code/{code}`, `/search`, `/active`, `/inactive`, `/statistics`) | ADMIN, STORE_MANAGER |
+| POST, PUT {id}, DELETE {id}, PATCH `/activate`, PATCH `/deactivate` | ADMIN |
+
+### Departments
+| Method | Endpoint | Access |
+|---|---|---|
+| GET `/api/departments`, GET `/{id}` | All roles |
+| POST, PUT {id}, DELETE {id} | ADMIN |
+
+### Purchase Requests
+| Method | Endpoint | Access |
+|---|---|---|
+| GET `/api/purchase-requests` | ADMIN, STORE_MANAGER, PROCUREMENT_MANAGER, FINANCE_MANAGER |
+| GET `/api/purchase-requests/my-requests` | All roles |
+| GET `/api/purchase-requests/{id}` | All roles |
+| GET `/api/purchase-requests/search` | ADMIN, STORE_MANAGER, PROCUREMENT_MANAGER, FINANCE_MANAGER |
+| POST `/api/purchase-requests` | All roles |
+| PUT `/api/purchase-requests/{id}` | All roles (only while DRAFT) |
+| PATCH `/api/purchase-requests/{id}/submit` | All roles |
+| PATCH `/api/purchase-requests/{id}/cancel` | All roles |
+
+### Approval Workflow
+| Method | Endpoint | Access |
+|---|---|---|
+| GET `/api/approvals/{prId}/history` | All roles |
+| POST `/api/approvals/{prId}/store-manager` | ADMIN, STORE_MANAGER |
+| POST `/api/approvals/{prId}/procurement-manager` | ADMIN, PROCUREMENT_MANAGER |
+| POST `/api/approvals/{prId}/finance-manager` | ADMIN, FINANCE_MANAGER |
+| POST `/api/approvals/{prId}/override` | ADMIN |
+
+### Purchase Orders
+| Method | Endpoint | Access |
+|---|---|---|
+| GET `/api/purchase-orders` (+ `/{id}`, `/status/{status}`, `/supplier/{supplierId}`) | ADMIN, STORE_MANAGER, PROCUREMENT_MANAGER, FINANCE_MANAGER |
+| POST `/api/purchase-orders/from-request/{prId}` | ADMIN, PROCUREMENT_MANAGER |
+| PATCH `/api/purchase-orders/{id}/issue`, `/mark-email-sent`, `/cancel` | ADMIN, PROCUREMENT_MANAGER |
+
+### Goods Receipt
+| Method | Endpoint | Access |
+|---|---|---|
+| GET `/api/goods-receipts` (+ `/{id}`, `/purchase-order/{poId}`) | ADMIN, STORE_MANAGER, PROCUREMENT_MANAGER |
+| POST `/api/goods-receipts/purchase-order/{poId}` | ADMIN, STORE_MANAGER |
+
+### Dashboard
+| Method | Endpoint | Access |
+|---|---|---|
+| GET `/api/dashboard` | ADMIN, STORE_MANAGER |
 
 ## 16. Sample Requests & Responses
 
 ### Login
 
-Request:
 ```json
 POST /api/auth/login
-{
-  "email": "admin@procurement.com",
-  "password": "Admin@123"
-}
+{ "email": "employee@procurement.com", "password": "Employee@123" }
 ```
-
-Response:
 ```json
 {
   "token": "eyJhbGciOiJIUzI1NiJ9...",
   "tokenType": "Bearer",
   "userId": "665f1c2e8a1b2c3d4e5f6789",
-  "email": "admin@procurement.com",
-  "firstName": "Ali",
-  "lastName": "Admin",
-  "role": "ADMIN"
+  "email": "employee@procurement.com",
+  "firstName": "Usman",
+  "lastName": "Employee",
+  "role": "EMPLOYEE"
 }
 ```
 
-### Create Product
+### Create Purchase Request
 
-Request:
 ```json
-POST /api/products
+POST /api/purchase-requests
 Authorization: Bearer <token>
 {
-  "name": "Stapler",
-  "description": "Heavy duty stapler",
-  "category": "Office Supplies",
-  "unitPrice": 4.5,
-  "currentStock": 50,
-  "minimumStock": 10,
-  "supplierId": "665f1c2e8a1b2c3d4e5f6700"
+  "department": "Information Technology",
+  "items": [
+    { "productId": "665f...", "requestedQuantity": 5, "estimatedUnitPrice": 65.0, "notes": "Backup drives" }
+  ],
+  "purpose": "Replenish backup storage devices",
+  "businessJustification": "Current drives are near end-of-life",
+  "priority": "MEDIUM",
+  "requiredDate": "2026-12-31T00:00:00Z"
 }
 ```
-
-Response:
 ```json
 {
-  "id": "665f1c2e8a1b2c3d4e5f679a",
-  "name": "Stapler",
-  "description": "Heavy duty stapler",
-  "category": "Office Supplies",
-  "unitPrice": 4.5,
-  "currentStock": 50,
-  "minimumStock": 10,
-  "supplier": {
-    "id": "665f1c2e8a1b2c3d4e5f6700",
-    "supplierCode": "SUP-0001",
-    "companyName": "ABC Office Supplies"
-  },
-  "status": "IN_STOCK",
-  "createdAt": "2026-07-07T10:00:00Z",
-  "updatedAt": "2026-07-07T10:00:00Z"
+  "id": "665f...",
+  "prNumber": "PR-0005",
+  "status": "DRAFT",
+  "currentApprovalLevel": null,
+  "estimatedTotal": 325.0,
+  "items": [
+    { "productId": "665f...", "productName": "External Hard Drive 1TB", "requestedQuantity": 5, "estimatedUnitPrice": 65.0, "estimatedLineTotal": 325.0, "notes": "Backup drives" }
+  ],
+  "createdBy": "employee@procurement.com",
+  "createdAt": "2026-07-11T10:00:00Z",
+  "updatedAt": "2026-07-11T10:00:00Z"
 }
 ```
 
-If `supplierId` does not reference an existing supplier, the API returns `404 Not Found` with message `Supplier not found with id: <id>`.
+After creation, call `PATCH /api/purchase-requests/{id}/submit` to enter the approval workflow (`currentApprovalLevel` becomes `STORE_MANAGER`, unless priority is `EMERGENCY`, in which case it is auto-approved immediately).
 
-### Create Supplier
+### Approve at Store Manager level
 
-Request:
 ```json
-POST /api/suppliers
-Authorization: Bearer <token>
-{
-  "companyName": "Sunrise Traders",
-  "contactPerson": "Kamran Malik",
-  "email": "sales@sunrisetraders.com",
-  "phone": "+92-42-9998877",
-  "alternatePhone": "+92-300-1112233",
-  "website": "https://sunrisetraders.com",
-  "address": "10 Ferozepur Road",
-  "city": "Lahore",
-  "state": "Punjab",
-  "country": "Pakistan",
-  "postalCode": "54700",
-  "taxNumber": "NTN-2000010",
-  "paymentTerms": "Net 30",
-  "deliveryLeadTime": 7,
-  "notes": "Preferred supplier for office consumables"
-}
+POST /api/approvals/{purchaseRequestId}/store-manager
+Authorization: Bearer <storeManagerToken>
+{ "decision": "APPROVED", "comments": "Confirmed need" }
 ```
-
-Response:
 ```json
 {
-  "id": "665f1c2e8a1b2c3d4e5f6799",
-  "supplierCode": "SUP-0006",
-  "companyName": "Sunrise Traders",
-  "contactPerson": "Kamran Malik",
-  "email": "sales@sunrisetraders.com",
-  "phone": "+92-42-9998877",
-  "alternatePhone": "+92-300-1112233",
-  "website": "https://sunrisetraders.com",
-  "address": "10 Ferozepur Road",
-  "city": "Lahore",
-  "state": "Punjab",
-  "country": "Pakistan",
-  "postalCode": "54700",
-  "taxNumber": "NTN-2000010",
-  "paymentTerms": "Net 30",
-  "deliveryLeadTime": 7,
-  "notes": "Preferred supplier for office consumables",
-  "status": "ACTIVE",
-  "createdAt": "2026-07-07T10:00:00Z",
-  "updatedAt": "2026-07-07T10:00:00Z"
+  "id": "665f...",
+  "purchaseRequestId": "665f...",
+  "prNumber": "PR-0005",
+  "level": "STORE_MANAGER",
+  "approverName": "Sara Manager",
+  "decision": "APPROVED",
+  "comments": "Confirmed need",
+  "isOverride": false,
+  "timestamp": "2026-07-11T10:05:00Z"
 }
 ```
 
-`supplierCode` is auto-generated (`SUP-0001`, `SUP-0002`, ...) — do not send it in the request. Duplicate `companyName`, `email`, or `supplierCode` values return `409 Conflict`.
+The purchase request's `currentApprovalLevel` automatically advances to `PROCUREMENT_MANAGER` (and further to `FINANCE_MANAGER` only if `estimatedTotal >= 5000`).
 
-### Supplier Statistics
+### Create Purchase Order from an approved request
 
-Request:
+```json
+POST /api/purchase-orders/from-request/{purchaseRequestId}
+Authorization: Bearer <procurementManagerToken>
+{
+  "items": [
+    { "productId": "665f...", "orderedQuantity": 5, "unitPrice": 65.0, "taxRate": 5.0, "discount": 0.0 }
+  ],
+  "shipping": 15.0,
+  "currency": "USD",
+  "expectedDeliveryDate": "2026-12-31T00:00:00Z"
+}
 ```
-GET /api/suppliers/statistics
-Authorization: Bearer <token>
-```
-
-Response:
 ```json
 {
-  "totalSuppliers": 6,
-  "activeSuppliers": 5,
-  "inactiveSuppliers": 1
+  "id": "665f...",
+  "poNumber": "PO-0002",
+  "supplierName": "Computer World",
+  "subtotal": 325.0,
+  "taxTotal": 16.25,
+  "discountTotal": 0.0,
+  "shipping": 15.0,
+  "grandTotal": 356.25,
+  "status": "DRAFT",
+  "timeline": [ { "status": "DRAFT", "remarks": "Purchase Order created from purchase request PR-0005", "...": "..." } ]
 }
 ```
 
-### Issue Stock
+### Record a Goods Receipt
 
-Request:
 ```json
-POST /api/issues
-Authorization: Bearer <token>
+POST /api/goods-receipts/purchase-order/{purchaseOrderId}
+Authorization: Bearer <storeManagerToken>
 {
-  "productId": "665f1c2e8a1b2c3d4e5f679a",
-  "employeeId": "665f1c2e8a1b2c3d4e5f6789",
-  "quantity": 2
+  "items": [
+    { "productId": "665f...", "receivedQuantity": 5, "rejectedQuantity": 0, "batchNumber": "BATCH-2026-010" }
+  ],
+  "warehouse": "Main Warehouse",
+  "storageLocation": "Rack B2",
+  "inspectionStatus": "PASSED"
+}
+```
+```json
+{
+  "grnNumber": "GRN-0002",
+  "poNumber": "PO-0002",
+  "items": [
+    { "productId": "665f...", "receivedQuantity": 5, "rejectedQuantity": 0, "acceptedQuantity": 5, "batchNumber": "BATCH-2026-010" }
+  ],
+  "status": "COMPLETED"
 }
 ```
 
-Response:
-```json
-{
-  "id": "665f1c2e8a1b2c3d4e5f679b",
-  "productId": "665f1c2e8a1b2c3d4e5f679a",
-  "productName": "Stapler",
-  "employeeId": "665f1c2e8a1b2c3d4e5f6789",
-  "employeeName": "Usman Employee",
-  "quantity": 2,
-  "issueDate": "2026-07-07T10:05:00Z",
-  "issuedBy": "storemanager@procurement.com",
-  "status": "ISSUED",
-  "returnDate": null
-}
-```
+The associated Purchase Order automatically moves to `COMPLETED` (or `PARTIALLY_RECEIVED` if only some items/quantities were fulfilled), and `Product.currentStock` for the external hard drive increases by 5.
 
 ### Dashboard Statistics
 
-Request:
-```
+```json
 GET /api/dashboard
-Authorization: Bearer <token>
 ```
-
-Response:
 ```json
 {
   "totalProducts": 7,
-  "totalInventoryItems": 226,
+  "totalInventoryItems": 229,
   "lowStockProducts": 2,
-  "outOfStockProducts": 1,
+  "outOfStockProducts": 0,
   "totalIssuedProducts": 0,
-  "productsNeedingPurchase": 3,
+  "productsNeedingPurchase": 2,
   "totalSuppliers": 5,
   "activeSuppliers": 5,
-  "inactiveSuppliers": 0
+  "inactiveSuppliers": 0,
+  "pendingPurchaseRequests": 1,
+  "approvedPurchaseRequests": 1,
+  "rejectedPurchaseRequests": 1,
+  "itemsWaitingApproval": 1,
+  "totalPurchaseOrders": 1,
+  "pendingPurchaseOrders": 0,
+  "completedPurchaseOrders": 1,
+  "totalGoodsReceipts": 1,
+  "pendingDeliveries": 0,
+  "monthlyProcurementSpend": 2872.50,
+  "inventoryValue": 24387.75,
+  "topSuppliers": [
+    { "supplierId": "665f...", "supplierName": "Tech Solutions Ltd", "totalPurchaseOrderValue": 2872.50, "purchaseOrderCount": 1 }
+  ]
 }
 ```
 
@@ -560,11 +647,11 @@ Response:
 
 ```json
 {
-  "timestamp": "2026-07-07T10:10:00Z",
-  "status": 404,
-  "error": "Not Found",
-  "message": "Product not found with id: abc123",
-  "path": "/api/products/abc123",
+  "timestamp": "2026-07-11T10:10:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Purchase request 'PR-0005' is not currently awaiting approval at level 'FINANCE_MANAGER'. It is awaiting: PROCUREMENT_MANAGER",
+  "path": "/api/approvals/665f.../finance-manager",
   "details": []
 }
 ```
@@ -572,35 +659,56 @@ Response:
 ## 17. Security Model
 
 - Passwords are hashed with BCrypt before storage; plaintext passwords are never persisted or logged.
-- Stateless JWT authentication — no server-side session state.
+- Stateless JWT authentication — no server-side session state. Unchanged since Phase 1.
 - `JwtFilter` runs once per request, validating signature and expiry before populating the Spring Security context.
-- Method-level authorization via `@PreAuthorize("hasRole(...)")` / `hasAnyRole(...)` on every controller method.
+- Method-level authorization via `@PreAuthorize("hasRole(...)")` / `hasAnyRole(...)` on every controller method, across all six phases.
 - CORS is configured centrally in `SecurityConfig`.
 - All error responses are standardized and never leak stack traces.
 - `/api/auth/login` and Swagger routes are the only public endpoints; everything else requires a valid Bearer token.
+- Workflow-level guards (in addition to role checks) prevent: approving a request at the wrong level, approving/rejecting an already-decided or cancelled request, converting anything but an APPROVED request into a Purchase Order, receiving goods against a non-issued Purchase Order, and over-receiving beyond the ordered quantity.
 
 ## 18. Role Matrix
 
-| Capability | ADMIN | STORE_MANAGER | EMPLOYEE |
-|---|:---:|:---:|:---:|
-| Manage Users | ✅ | ❌ | ❌ |
-| Manage Products | ✅ | ❌ | ❌ |
-| View Products | ✅ | ✅ | ✅ |
-| Manage Inventory | ✅ | ✅ | ❌ |
-| Manage Stock Issues | ✅ | ✅ | ❌ |
-| View Dashboard | ✅ | ✅ | ❌ |
-| Manage Suppliers (create/update/delete/activate/deactivate) | ✅ | ❌ | ❌ |
-| View & Search Suppliers | ✅ | ✅ | ❌ |
-| View Own Profile | ✅ | ✅ | ✅ |
+| Capability | ADMIN | STORE_MANAGER | PROCUREMENT_MANAGER | FINANCE_MANAGER | EMPLOYEE |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Manage Users | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Manage Products | ✅ | ❌ | ❌ | ❌ | ❌ |
+| View Products | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Manage Inventory | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Manage Stock Issues | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Manage Suppliers | ✅ | ❌ | ❌ | ❌ | ❌ |
+| View/Search Suppliers | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Manage Departments | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Create Purchase Request | ✅ | ✅ | ✅ | ✅ | ✅ |
+| View Own Purchase Requests | ✅ | ✅ | ✅ | ✅ | ✅ |
+| View All Purchase Requests | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Approve at Store Manager level | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Approve at Procurement Manager level | ✅ | ❌ | ✅ | ❌ | ❌ |
+| Approve at Finance Manager level | ✅ | ❌ | ❌ | ✅ | ❌ |
+| Admin Override Approval | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Create/Issue/Cancel Purchase Orders | ✅ | ❌ | ✅ | ❌ | ❌ |
+| View Purchase Orders | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Record Goods Receipt | ✅ | ✅ | ❌ | ❌ | ❌ |
+| View Goods Receipts | ✅ | ✅ | ✅ | ❌ | ❌ |
+| View Dashboard | ✅ | ✅ | ❌ | ❌ | ❌ |
+| View Own Profile | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ## 19. Future Roadmap
 
-- ~~**Suppliers** module — supplier master data, contact info, contracts~~ ✅ Completed in Phase 2
-- **Purchase Requests** — employee/store-manager initiated requests feeding procurement recommendations
-- **Purchase Orders** — formal orders issued to suppliers (using `Supplier.id`), linked to purchase requests
-- **Goods Receipt** — the only future module that increases `Product.currentStock`, tied to Purchase Orders and suppliers
-- **Approvals** — configurable multi-level approval workflow for purchase requests/orders
-- **Reports** — exportable inventory, procurement, supplier, and consumption reports (CSV/PDF)
-- **Notifications** — email/push notifications for low stock, approvals, and order status changes
+- ~~**Suppliers** module~~ ✅ Phase 2
+- ~~**Purchase Requests**~~ ✅ Phase 3
+- ~~**Approval Workflow**~~ ✅ Phase 4
+- ~~**Purchase Orders**~~ ✅ Phase 5
+- ~~**Goods Receipt (GRN)**~~ ✅ Phase 6
+- **Warehouses & Locations** as first-class entities (currently free-text fields on Goods Receipt)
+- **Categories & Subcategories** as first-class entities (currently a free-text field on Product)
+- **Procurement budgets** with validation against departmental spend limits
+- **Supplier performance metrics** — on-time delivery rate, rejection rate, average lead time, computed from Goods Receipt history
+- **Multiple suppliers per product** with per-supplier pricing history
+- **PDF generation** for printable Purchase Orders (the `PurchaseOrderResponse` DTO is already structured to support this directly)
+- **Reports** — exportable procurement, spend, and supplier performance reports (CSV/PDF)
+- **Notifications** — email/push notifications for pending approvals, low stock, and PO status changes
+- **Attachments** on purchase requests and purchase orders (e.g. quotes, specifications)
+- **Optimistic locking** (version field) once concurrent multi-approver editing becomes a real-world concern
 
-The package structure (`config`, `controller`, `service`, `repository`, `model`, `dto`, `security`, `exception`) remains intentionally generic so each future module — including Purchase Requests and Purchase Orders, which will build directly on the Supplier module added in Phase 2 — can be added as new files within the same layers without refactoring existing code.
+The package structure (`config`, `controller`, `service`, `repository`, `model`, `dto`, `security`, `exception`) remains intentionally generic so each future item above can be added as new files within the same layers without refactoring existing code.

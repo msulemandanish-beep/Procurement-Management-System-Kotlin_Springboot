@@ -28,6 +28,22 @@
     {
       "key": "supplierId",
       "value": ""
+    },
+    {
+      "key": "departmentId",
+      "value": ""
+    },
+    {
+      "key": "purchaseRequestId",
+      "value": ""
+    },
+    {
+      "key": "purchaseOrderId",
+      "value": ""
+    },
+    {
+      "key": "goodsReceiptId",
+      "value": ""
     }
   ],
   "item": [
@@ -879,6 +895,814 @@
                 "api",
                 "suppliers",
                 "statistics"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Departments",
+      "item": [
+        {
+          "name": "Get All Departments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/departments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "departments"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Department By Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/departments/{{departmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "departments",
+                "{{departmentId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Department",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Marketing\",\n  \"code\": \"MKT\",\n  \"description\": \"Marketing and communications\",\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/departments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "departments"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Department",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Marketing\",\n  \"code\": \"MKT\",\n  \"description\": \"Marketing, communications & branding\",\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/departments/{{departmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "departments",
+                "{{departmentId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Department",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/departments/{{departmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "departments",
+                "{{departmentId}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Purchase Requests",
+      "item": [
+        {
+          "name": "Get All Purchase Requests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get My Purchase Requests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-requests/my-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-requests",
+                "my-requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Purchase Request By Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-requests/{{purchaseRequestId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-requests",
+                "{{purchaseRequestId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Search Purchase Requests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-requests/search?status=SUBMITTED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-requests",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "SUBMITTED"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Purchase Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"department\": \"Information Technology\",\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"requestedQuantity\": 5,\n      \"estimatedUnitPrice\": 65.0,\n      \"notes\": \"Backup drives for the team\"\n    }\n  ],\n  \"purpose\": \"Replenish backup storage devices\",\n  \"businessJustification\": \"Current backup drives are near end-of-life\",\n  \"priority\": \"MEDIUM\",\n  \"requiredDate\": \"2026-12-31T00:00:00Z\",\n  \"remarks\": \"Please expedite if possible\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Purchase Request",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"department\": \"Information Technology\",\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"requestedQuantity\": 5,\n      \"estimatedUnitPrice\": 65.0,\n      \"notes\": \"Backup drives for the team\"\n    }\n  ],\n  \"purpose\": \"Replenish backup storage devices\",\n  \"businessJustification\": \"Current backup drives are near end-of-life\",\n  \"priority\": \"MEDIUM\",\n  \"requiredDate\": \"2026-12-31T00:00:00Z\",\n  \"remarks\": \"Please expedite if possible\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-requests/{{purchaseRequestId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-requests",
+                "{{purchaseRequestId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Submit Purchase Request",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-requests/{{purchaseRequestId}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-requests",
+                "{{purchaseRequestId}}",
+                "submit"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cancel Purchase Request",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-requests/{{purchaseRequestId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-requests",
+                "{{purchaseRequestId}}",
+                "cancel"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Approval Workflow",
+      "item": [
+        {
+          "name": "Get Approval History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/approvals/{{purchaseRequestId}}/history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "approvals",
+                "{{purchaseRequestId}}",
+                "history"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Store Manager Decision",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"APPROVED\",\n  \"comments\": \"Approved by store manager\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/approvals/{{purchaseRequestId}}/store-manager",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "approvals",
+                "{{purchaseRequestId}}",
+                "store-manager"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Procurement Manager Decision",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"APPROVED\",\n  \"comments\": \"Approved by procurement manager\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/approvals/{{purchaseRequestId}}/procurement-manager",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "approvals",
+                "{{purchaseRequestId}}",
+                "procurement-manager"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Finance Manager Decision",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"APPROVED\",\n  \"comments\": \"Approved by finance manager\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/approvals/{{purchaseRequestId}}/finance-manager",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "approvals",
+                "{{purchaseRequestId}}",
+                "finance-manager"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Admin Override Approval",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/approvals/{{purchaseRequestId}}/override?comments=Emergency%20override",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "approvals",
+                "{{purchaseRequestId}}",
+                "override"
+              ],
+              "query": [
+                {
+                  "key": "comments",
+                  "value": "Emergency override"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Purchase Orders",
+      "item": [
+        {
+          "name": "Get All Purchase Orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-orders"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Purchase Order By Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-orders/{{purchaseOrderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-orders",
+                "{{purchaseOrderId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Purchase Orders By Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-orders/status/ISSUED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-orders",
+                "status",
+                "ISSUED"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Purchase Orders By Supplier",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-orders/supplier/{{supplierId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-orders",
+                "supplier",
+                "{{supplierId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Purchase Order From Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"orderedQuantity\": 5,\n      \"unitPrice\": 65.0,\n      \"taxRate\": 5.0,\n      \"discount\": 0.0\n    }\n  ],\n  \"shipping\": 15.0,\n  \"currency\": \"USD\",\n  \"expectedDeliveryDate\": \"2026-12-31T00:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-orders/from-request/{{purchaseRequestId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-orders",
+                "from-request",
+                "{{purchaseRequestId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Issue Purchase Order",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-orders/{{purchaseOrderId}}/issue",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-orders",
+                "{{purchaseOrderId}}",
+                "issue"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Mark Purchase Order Email Sent",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-orders/{{purchaseOrderId}}/mark-email-sent",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-orders",
+                "{{purchaseOrderId}}",
+                "mark-email-sent"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cancel Purchase Order",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/purchase-orders/{{purchaseOrderId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "purchase-orders",
+                "{{purchaseOrderId}}",
+                "cancel"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Goods Receipt",
+      "item": [
+        {
+          "name": "Get All Goods Receipts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/goods-receipts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "goods-receipts"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Goods Receipt By Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/goods-receipts/{{goodsReceiptId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "goods-receipts",
+                "{{goodsReceiptId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Goods Receipts For Purchase Order",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/goods-receipts/purchase-order/{{purchaseOrderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "goods-receipts",
+                "purchase-order",
+                "{{purchaseOrderId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Record Goods Receipt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"receivedQuantity\": 5,\n      \"rejectedQuantity\": 0,\n      \"batchNumber\": \"BATCH-2026-010\"\n    }\n  ],\n  \"warehouse\": \"Main Warehouse\",\n  \"storageLocation\": \"Rack B2\",\n  \"inspectionStatus\": \"PASSED\",\n  \"qualityNotes\": \"All units inspected and accepted\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/goods-receipts/purchase-order/{{purchaseOrderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "goods-receipts",
+                "purchase-order",
+                "{{purchaseOrderId}}"
               ]
             }
           }
