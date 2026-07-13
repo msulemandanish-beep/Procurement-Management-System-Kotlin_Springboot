@@ -12,8 +12,18 @@ data class ProductRequest(
     @field:NotBlank(message = "Description is required")
     val description: String,
 
-    @field:NotBlank(message = "Category is required")
-    val category: String,
+    @field:NotBlank(message = "Category id is required")
+    val categoryId: String,
+
+    val sku: String? = null,
+
+    val barcode: String? = null,
+
+    val unitOfMeasure: String = "EA",
+
+    val currency: String = "USD",
+
+    val imageUrl: String? = null,
 
     @field:NotNull(message = "Unit price is required")
     @field:PositiveOrZero(message = "Unit price must be zero or positive")

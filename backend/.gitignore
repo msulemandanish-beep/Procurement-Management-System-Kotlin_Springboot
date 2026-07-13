@@ -39,3 +39,9 @@ out/
 ### Environment ###
 .env
 *.log
+
+### Local file attachments (Phase 10) ###
+/uploads/
+
+### Logs ###
+/logs/

@@ -42,6 +42,9 @@ data class PurchaseRequest(
 
     val estimatedTotal: Double = items.sumOf { it.requestedQuantity * it.estimatedUnitPrice },
 
+    /** Phase 17 — full activity history (created, edited, submitted, approved, etc.). */
+    val timeline: List<PurchaseRequestTimelineEntry> = emptyList(),
+
     val createdBy: String,
 
     val updatedBy: String? = null,

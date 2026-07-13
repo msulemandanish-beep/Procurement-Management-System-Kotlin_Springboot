@@ -2,7 +2,6 @@ package com.company.procurement.service
 
 import com.company.procurement.dto.dashboard.DashboardResponse
 import com.company.procurement.dto.dashboard.TopSupplierResponse
-import com.company.procurement.model.GoodsReceiptStatus
 import com.company.procurement.model.IssueStatus
 import com.company.procurement.model.ProductStatus
 import com.company.procurement.model.PurchaseOrderStatus
@@ -14,6 +13,8 @@ import com.company.procurement.repository.PurchaseOrderRepository
 import com.company.procurement.repository.PurchaseRequestRepository
 import com.company.procurement.repository.StockIssueRepository
 import com.company.procurement.repository.SupplierRepository
+import com.company.procurement.repository.CategoryRepository
+import com.company.procurement.repository.DepartmentBudgetRepository
 import org.springframework.stereotype.Service
 import java.time.Instant
 import java.time.ZoneOffset
@@ -25,7 +26,9 @@ class DashboardService(
     private val supplierRepository: SupplierRepository,
     private val purchaseRequestRepository: PurchaseRequestRepository,
     private val purchaseOrderRepository: PurchaseOrderRepository,
-    private val goodsReceiptRepository: GoodsReceiptRepository
+    private val goodsReceiptRepository: GoodsReceiptRepository,
+    private val categoryRepository: CategoryRepository,
+    private val departmentBudgetRepository: DepartmentBudgetRepository
 ) {
 
     fun getDashboardStatistics(): DashboardResponse {
@@ -98,6 +101,22 @@ class DashboardService(
             .sortedByDescending { it.totalPurchaseOrderValue }
             .take(5)
 
+        val totalCategories = categoryRepository.findByDeletedFalse().size.toLong()
+
+        val currentFiscalYear = now.atZone(ZoneOffset.UTC).year
+        val budgets = departmentBudgetRepository.findByFiscalYear(currentFiscalYear)
+        val totalAnnualBudget = budgets.sumOf { it.annualBudget }
+        val totalReservedBudget = budgets.sumOf { it.reservedAmount }
+        val totalSpentBudget = budgets.sumOf { it.spentAmount }
+        val averageBudgetUtilizationPercentage = if (budgets.isNotEmpty()) {
+            budgets.map { if (it.annualBudget <= 0.0) 0.0 else ((it.spentAmount + it.reservedAmount) / it.annualBudget) * 100.0 }.average()
+        } else {
+            0.0
+        }
+        val departmentsOverBudget = budgets.count { (it.spentAmount + it.reservedAmount) > it.annualBudget }.toLong()
+
+        val openStockWarnings = lowStockProducts + outOfStockProducts
+
         return DashboardResponse(
             totalProducts = totalProducts,
             totalInventoryItems = totalInventoryItems,
@@ -119,7 +138,14 @@ class DashboardService(
             pendingDeliveries = pendingDeliveries,
             monthlyProcurementSpend = monthlyProcurementSpend,
             inventoryValue = inventoryValue,
-            topSuppliers = topSuppliers
+            topSuppliers = topSuppliers,
+            totalCategories = totalCategories,
+            totalAnnualBudget = totalAnnualBudget,
+            totalReservedBudget = totalReservedBudget,
+            totalSpentBudget = totalSpentBudget,
+            averageBudgetUtilizationPercentage = averageBudgetUtilizationPercentage,
+            departmentsOverBudget = departmentsOverBudget,
+            openStockWarnings = openStockWarnings
         )
     }
 }

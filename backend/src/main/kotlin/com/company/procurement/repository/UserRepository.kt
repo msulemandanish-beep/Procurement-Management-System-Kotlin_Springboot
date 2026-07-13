@@ -1,5 +1,6 @@
 package com.company.procurement.repository
 
+import com.company.procurement.model.Role
 import com.company.procurement.model.User
 import org.springframework.data.mongodb.repository.MongoRepository
 import org.springframework.stereotype.Repository
@@ -8,4 +9,5 @@ import org.springframework.stereotype.Repository
 interface UserRepository : MongoRepository<User, String> {
     fun findByEmail(email: String): User?
     fun existsByEmail(email: String): Boolean
+    fun findByRole(role: Role): List<User>
 }

@@ -21,14 +21,32 @@ class ProductController(
 ) {
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'STORE_MANAGER', 'EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'STORE_MANAGER', 'PROCUREMENT_MANAGER', 'FINANCE_MANAGER', 'EMPLOYEE')")
     @Operation(summary = "Get all products", description = "Retrieve a list of all products")
     fun getAllProducts(): ResponseEntity<List<ProductResponse>> {
         return ResponseEntity.ok(productService.getAllProducts())
     }
 
+    @GetMapping("/page")
+    @PreAuthorize("hasAnyRole('ADMIN', 'STORE_MANAGER', 'PROCUREMENT_MANAGER', 'FINANCE_MANAGER', 'EMPLOYEE')")
+    @Operation(
+        summary = "Get a paginated, sortable, searchable page of products",
+        description = "Phase 14/15: supports page, size, sort field (createdAt|unitPrice|currentStock|name), direction, free-text search (name/SKU), and category/supplier filters"
+    )
+    fun getProductsPage(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+        @RequestParam(defaultValue = "createdAt") sort: String,
+        @RequestParam(defaultValue = "DESC") direction: String,
+        @RequestParam(required = false) categoryId: String?,
+        @RequestParam(required = false) supplierId: String?,
+        @RequestParam(required = false) search: String?
+    ): ResponseEntity<com.company.procurement.dto.common.PagedResponse<ProductResponse>> {
+        return ResponseEntity.ok(productService.getProductsPage(page, size, sort, direction, categoryId, supplierId, search))
+    }
+
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STORE_MANAGER', 'EMPLOYEE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'STORE_MANAGER', 'PROCUREMENT_MANAGER', 'FINANCE_MANAGER', 'EMPLOYEE')")
     @Operation(summary = "Get product by id", description = "Retrieve a single product by its id")
     fun getProductById(@PathVariable id: String): ResponseEntity<ProductResponse> {
         return ResponseEntity.ok(productService.getProductById(id))

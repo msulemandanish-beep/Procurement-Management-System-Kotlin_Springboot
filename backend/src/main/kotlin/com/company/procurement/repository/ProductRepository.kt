@@ -9,4 +9,6 @@ import org.springframework.stereotype.Repository
 interface ProductRepository : MongoRepository<Product, String> {
     fun findByStatus(status: ProductStatus): List<Product>
     fun existsByNameIgnoreCase(name: String): Boolean
+    /** Used for uniqueness checks so a soft-deleted product's name can be reused (Phase 16 fix). */
+    fun existsByNameIgnoreCaseAndDeletedFalse(name: String): Boolean
 }

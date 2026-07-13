@@ -20,6 +20,9 @@ data class Department(
 
     val active: Boolean = true,
 
+    /** Soft-delete flag (Phase 16). Historical Purchase Requests retain their department name. */
+    val deleted: Boolean = false,
+
     val createdAt: Instant = Instant.now(),
 
     val updatedAt: Instant = Instant.now()

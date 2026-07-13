@@ -29,7 +29,22 @@ data class DashboardResponse(
     // Cross-cutting procurement metrics
     val monthlyProcurementSpend: Double,
     val inventoryValue: Double,
-    val topSuppliers: List<TopSupplierResponse>
+    val topSuppliers: List<TopSupplierResponse>,
+
+    // Phase 9 - Categories
+    val totalCategories: Long,
+
+    // Phase 11 - Budgets
+    val totalAnnualBudget: Double,
+    val totalReservedBudget: Double,
+    val totalSpentBudget: Double,
+    val averageBudgetUtilizationPercentage: Double,
+    val departmentsOverBudget: Long,
+
+    // Phase 8 - Notifications (system-wide unread count is not meaningful per-user;
+    // this is the count of low/out-of-stock warnings currently open, a proxy for
+    // "notifications an ADMIN/STORE_MANAGER should look at right now")
+    val openStockWarnings: Long
 )
 
 data class TopSupplierResponse(

@@ -1,288 +1,130 @@
 # Frontend Handoff Document — Procurement Management System
 
-This document explains everything a frontend developer needs to build the entire Procurement Management System UI without asking backend questions: authentication, every API contract across all six phases, business rules, error handling, and page-by-page/screen-by-screen UI guidance.
+Everything a frontend developer needs to build the entire system: authentication, every API across all 18 phases, business rules, error handling, screen-by-screen guidance, and a recommended React component architecture.
 
 Base URL (local): `http://localhost:8080`
 
 ---
 
-## 1. Authentication & JWT Handling
-
-All endpoints except `POST /api/auth/login` and Swagger routes require:
-
-```
-Authorization: Bearer <token>
-```
-
-### Login
+## 1. Authentication Flow
 
 ```json
 POST /api/auth/login
 { "email": "employee@procurement.com", "password": "Employee@123" }
 ```
 ```json
-{
-  "token": "eyJhbGciOiJIUzI1NiJ9...",
-  "tokenType": "Bearer",
-  "userId": "665f...",
-  "email": "employee@procurement.com",
-  "firstName": "Usman",
-  "lastName": "Employee",
-  "role": "EMPLOYEE"
-}
+{ "token": "eyJ...", "tokenType": "Bearer", "userId": "...", "email": "...", "firstName": "...", "lastName": "...", "role": "EMPLOYEE" }
 ```
 
 Roles: `ADMIN`, `STORE_MANAGER`, `PROCUREMENT_MANAGER`, `FINANCE_MANAGER`, `EMPLOYEE`.
 
-### Handling rules
-
-1. Store `token` and `role` after login (in memory or secure storage — avoid `localStorage` in production-grade builds if possible).
+1. Store `token` + `role` (in memory or secure storage).
 2. Attach `Authorization: Bearer <token>` to every request.
-3. On `401 Unauthorized` anywhere: clear auth state, redirect to Login.
-4. On `403 Forbidden`: user is authenticated but lacks permission — show "access denied", do not log them out.
-5. Tokens expire after 24h by default (`86400000` ms).
-6. Use `role` to drive navigation, page access, and button visibility per the Role Matrix (Section 10).
+3. `401` anywhere → clear auth, redirect to Login.
+4. `403` → "access denied" toast, do not log out.
+5. Tokens expire after 24h by default.
 
----
+## 2. Response & Error Conventions (unchanged since Phase 6)
 
-## 2. Standard Response Conventions
+- `200`/`201`/`204` on success.
+- Every error body: `{ timestamp, status, error, message, path, details[] }` — `message` is always safe to show directly; `details[]` populated on `400` validation failures (one string per field).
+- `409` = business rule violation (workflow state, duplicates, budget/stock issues) — `message` is specific and end-user-safe.
 
-### Headers
-Every authenticated request needs:
-```
-Authorization: Bearer <token>
-Content-Type: application/json   (for POST/PUT/PATCH bodies)
-```
-
-### Success responses
-- `200 OK` — GET, PUT, PATCH, most successful reads/updates
-- `201 Created` — POST that creates a resource
-- `204 No Content` — DELETE
-
-### Error response (identical shape everywhere)
+### Pagination (Phase 15)
+`GET /api/{products|suppliers|purchase-requests|purchase-orders}/page?page=0&size=20&sort=<field>&direction=ASC|DESC&search=<text>` (plus each module's own filters) returns:
 ```json
-{
-  "timestamp": "2026-07-11T10:10:00Z",
-  "status": 409,
-  "error": "Conflict",
-  "message": "human-readable message — safe to show directly in a toast",
-  "path": "/api/approvals/665f.../finance-manager",
-  "details": ["field: message", "..."]
-}
+{ "content": [...], "page": 0, "size": 20, "totalElements": 47, "totalPages": 3, "last": false }
 ```
-- `400` — validation failure; `details` lists each field error, show them inline on the form.
-- `401` — invalid/expired token → redirect to Login.
-- `403` — authenticated but forbidden → show access-denied message.
-- `404` — resource not found.
-- `409` — business rule violation (duplicate, wrong workflow state, insufficient stock, etc.) — `message` is always end-user-safe and specific; show it directly.
-- `500` — unexpected error → generic "something went wrong" toast.
+The original unpaginated endpoints (`GET /api/products`, etc.) still return plain arrays — use them for small reference lists (e.g. populating a dropdown), and the `/page` variants for main data tables.
 
-### Pagination, search, and filtering
-Most list endpoints across Phases 1–2 return plain arrays (no pagination — the datasets are small: users, products, suppliers). Phase 3+ list endpoints that can grow large (`/api/purchase-requests`, `/api/purchase-orders`, `/api/goods-receipts`) also currently return plain arrays for simplicity, but support **query-parameter filtering**:
-
-- `GET /api/purchase-requests/search?status=SUBMITTED&department=IT&priority=HIGH&employeeId=...`
-- `GET /api/purchase-orders/status/{status}`
-- `GET /api/purchase-orders/supplier/{supplierId}`
-
-All filter parameters are optional and combinable. Build list pages assuming client-side pagination/sorting on top of these arrays (e.g. a data-table component with built-in paging) until a dedicated paginated endpoint is introduced.
+### CSV downloads (Phase 7)
+Any `/api/reports/*` endpoint called with `?format=csv` returns `text/csv` with a `Content-Disposition: attachment` header — trigger it as a normal file download (e.g. `window.open(url)` or an `<a download>` link with the Authorization header attached via fetch + blob).
 
 ---
 
 ## 3. Complete API Contract
 
-### 3.1 Auth
-| Method | Endpoint | Auth | Body → Response |
-|---|---|---|---|
-| POST | `/api/auth/login` | No | `{email,password}` → `LoginResponse` |
+### 3.1–3.6 (Phases 1–2) — Auth, Users, Products, Inventory, Stock Issues, Suppliers
+Unchanged from the Phase 6 handoff **except**:
+- `ProductRequest` now sends `categoryId` (required) instead of `category`, plus optional `sku`, `barcode`, `unitOfMeasure` (default `"EA"`), `currency` (default `"USD"`), `imageUrl`.
+- `ProductResponse` now embeds `category: { id, name, parentCategoryName }` alongside `supplier`, plus a computed `stockValue`.
+- `GET /api/suppliers/{id}/performance` (Phase 12) returns a read-only scorecard — see section 3.12.
 
-### 3.2 Users (ADMIN only)
-| Method | Endpoint | Body → Response |
+### 3.7 Departments — unchanged.
+
+### 3.8 Purchase Requests — unchanged contract, **plus**:
+- `PurchaseRequestResponse.timeline[]` (Phase 17): `{ status, remarks, actorId, actorName, timestamp }[]` — render as a vertical activity log on the detail page.
+- Creating a request now runs server-side duplicate detection: a `409` with a message about "a similar purchase request... already active" means the same employee already has a non-terminal request for the same department + product set. Show this inline rather than retrying.
+- New: `GET /api/purchase-requests/page` (Phase 15) — see section 2.
+
+### 3.9 Approval Workflow — unchanged contract, **plus**:
+- Rejecting now requires `comments` — if omitted, expect a `400`/`409` with message "A rejection reason is mandatory...". Make the comments field required in the UI whenever "Reject" is selected.
+- Approvals may now route to Finance even below the $5,000 threshold if the department's budget would be exceeded — don't hardcode the threshold client-side; always trust `purchaseRequest.currentApprovalLevel`.
+
+### 3.10 Purchase Orders — unchanged contract, plus `GET /api/purchase-orders/page` (Phase 15).
+
+### 3.11 Goods Receipt — unchanged contract from Phase 6.
+
+### 3.12 Supplier Performance (Phase 12)
+```
+GET /api/suppliers/{id}/performance
+```
+```json
+{
+  "supplierId": "...", "supplierName": "...", "totalPurchaseOrders": 4, "completedOrders": 3,
+  "cancelledOrders": 0, "averageDeliveryTimeDays": 6.3, "lateDeliveries": 1,
+  "acceptedQuantity": 42, "rejectedQuantity": 1, "onTimeDeliveryPercentage": 66.7,
+  "supplierRating": 4.1, "averageOrderValue": 1875.50, "totalProcurementValue": 7502.00
+}
+```
+Read-only, entirely computed. No edit form should ever exist for these fields.
+
+### 3.13 Categories (Phase 9)
+| Method | Endpoint | Auth |
 |---|---|---|
-| GET | `/api/users` | → `UserResponse[]` |
-| GET | `/api/users/{id}` | → `UserResponse` |
-| POST | `/api/users` | `UserRequest` → `UserResponse` (201) |
-| PUT | `/api/users/{id}` | `UserRequest` → `UserResponse` |
-| DELETE | `/api/users/{id}` | → 204 |
+| GET | `/api/categories` (nested main+sub), `/{id}`, `/search?keyword=`, `/statistics` | all roles (statistics: managers/admin) |
+| POST, PUT `/{id}`, PATCH `/{id}/activate`, `/deactivate`, DELETE `/{id}` | ADMIN |
 
-`UserRequest`: `{ firstName, lastName, email, password?, role, active }` — `role` is one of the 5 roles; `password` optional on update (omit to keep current).
+`CategoryRequest`: `{ name, parentCategoryId?, description?, active }` — omit `parentCategoryId` for a main category.
+`CategoryResponse` includes a nested `subcategories: CategoryResponse[]` when it's a main category.
 
-### 3.3 Products
-| Method | Endpoint | Auth | Body → Response |
-|---|---|---|---|
-| GET | `/api/products`, `/api/products/{id}` | All roles | → `ProductResponse` |
-| POST, PUT, DELETE | `/api/products` | ADMIN | `ProductRequest` → `ProductResponse` |
+### 3.14 Notifications (Phase 8)
+| Method | Endpoint |
+|---|---|
+| GET | `/api/notifications`, `/unread`, `/unread-count` |
+| PATCH | `/{id}/read`, `/read-all` |
 
-`ProductRequest`: `{ name, description, category, unitPrice, currentStock, minimumStock, supplierId }` — `supplierId` **required**, must reference an existing supplier (404 otherwise).
+`NotificationResponse`: `{ id, type, title, message, relatedEntityType, relatedEntityId, read, readAt, createdAt }`. `type` values: `PURCHASE_REQUEST_SUBMITTED`, `APPROVAL_REQUIRED`, `APPROVAL_REJECTED`, `APPROVAL_APPROVED`, `PURCHASE_ORDER_CREATED`, `PURCHASE_ORDER_ISSUED`, `GOODS_RECEIVED`, `LOW_STOCK_WARNING`, `OUT_OF_STOCK_WARNING`, `SUPPLIER_DEACTIVATED`, `BUDGET_EXCEEDED`, `BUDGET_NEARLY_EXHAUSTED`. Use `relatedEntityType`/`relatedEntityId` to deep-link the notification to the right detail page. Poll `GET /unread-count` (e.g. every 30-60s) for a navbar badge, or refresh on route change.
 
-`ProductResponse` embeds supplier so no second call is needed:
-```json
-{
-  "id": "...", "name": "...", "unitPrice": 65.0, "currentStock": 25, "minimumStock": 10,
-  "supplier": { "id": "...", "supplierCode": "SUP-0004", "companyName": "Computer World" },
-  "status": "IN_STOCK", "createdAt": "...", "updatedAt": "..."
-}
-```
-Populate the Supplier dropdown on the Product form from `GET /api/suppliers/active`.
-
-### 3.4 Inventory (ADMIN, STORE_MANAGER)
-| Method | Endpoint | Response |
+### 3.15 Budgets (Phase 11)
+| Method | Endpoint | Auth |
 |---|---|---|
-| GET | `/api/inventory` | `InventoryResponse[]` |
-| GET | `/api/inventory/low-stock` | `InventoryResponse[]` |
-| GET | `/api/inventory/out-of-stock` | `InventoryResponse[]` |
-| GET | `/api/inventory/status` | `{IN_STOCK, LOW_STOCK, OUT_OF_STOCK}` counts |
-| GET | `/api/inventory/procurement-recommendations` | `ProcurementRecommendationResponse[]` |
+| GET | `/api/budgets?fiscalYear=`, `/department/{departmentId}?fiscalYear=` | ADMIN, FINANCE_MANAGER, PROCUREMENT_MANAGER |
+| POST | `/api/budgets` (create/update annual budget) | ADMIN, FINANCE_MANAGER |
 
-### 3.5 Stock Issues (ADMIN, STORE_MANAGER)
-| Method | Endpoint | Body → Response |
-|---|---|---|
-| GET | `/api/issues`, `/api/issues/history` | → `IssueResponse[]` |
-| POST | `/api/issues` | `{productId, employeeId, quantity}` → `IssueResponse` |
-| PUT | `/api/issues/{id}/return` | → `IssueResponse` |
+`DepartmentBudgetResponse`: `{ id, departmentId, departmentName, fiscalYear, annualBudget, reservedAmount, spentAmount, remainingAmount, availableAmount, utilizationPercentage, warningLevel }` — `warningLevel` is `HEALTHY | NEARLY_EXHAUSTED | EXCEEDED`; drive a progress bar color from it directly (green/orange/red). `reservedAmount`/`spentAmount` are never directly editable — only `annualBudget` is sent in the request.
 
-### 3.6 Suppliers
-| Method | Endpoint | Auth | Body → Response |
-|---|---|---|---|
-| GET | `/api/suppliers` (+ `/{id}`, `/code/{code}`, `/search?keyword=`, `/active`, `/inactive`, `/statistics`) | ADMIN, STORE_MANAGER | → `SupplierResponse[]` / `SupplierSearchResponse[]` / `SupplierStatisticsResponse` |
-| POST | `/api/suppliers` | ADMIN | `SupplierRequest` → `SupplierResponse` (201) |
-| PUT | `/api/suppliers/{id}` | ADMIN | `SupplierUpdateRequest` → `SupplierResponse` |
-| DELETE | `/api/suppliers/{id}` | ADMIN | → 204 |
-| PATCH | `/api/suppliers/{id}/activate`, `/deactivate` | ADMIN | → `SupplierResponse` |
+### 3.16 Attachments (Phase 10)
+| Method | Endpoint |
+|---|---|
+| POST | `/api/attachments/{ownerType}/{ownerId}` — multipart form, fields: `documentType` (text) + `file` (binary) |
+| GET | `/api/attachments/{ownerType}/{ownerId}` — metadata list |
+| GET | `/api/attachments/{id}/download` — raw file stream |
+| DELETE | `/api/attachments/{id}` |
 
-`SupplierRequest`: `{ companyName, contactPerson, email, phone, alternatePhone?, website?, address, city, state, country, postalCode, taxNumber, paymentTerms, deliveryLeadTime, notes? }`. `supplierCode` is server-generated (`SUP-0001`, ...) — never send it.
+`ownerType` is `PURCHASE_REQUEST` or `PURCHASE_ORDER`. `documentType` is `QUOTATION | VENDOR_QUOTATION | INVOICE | TECHNICAL_SPECIFICATION | SUPPORTING_DOCUMENT`. Upload with `FormData` + `fetch` (don't set `Content-Type` manually — let the browser set the multipart boundary).
 
-### 3.7 Departments
-| Method | Endpoint | Auth | Body → Response |
-|---|---|---|---|
-| GET | `/api/departments`, `/api/departments/{id}` | All roles | → `DepartmentResponse[]` |
-| POST, PUT, DELETE | `/api/departments` | ADMIN | `DepartmentRequest` → `DepartmentResponse` |
+### 3.17 Reports (Phase 7)
+`GET /api/reports/{inventory|low-stock|inventory-value|suppliers|purchase-requests|purchase-orders|goods-receipts|department-spending|procurement-spending|monthly-summary}` — each accepts relevant filters (`fromDate`, `toDate`, `departmentId`, `supplierId`, `status`, `employeeId`, `categoryId`) plus `format=json|csv`. JSON responses are wrapped: `{ reportName, generatedAt, rowCount, rows: [...] }`.
 
-`DepartmentRequest`: `{ name, code, description?, active }`. Populate the Purchase Request form's Department field from `GET /api/departments`.
+### 3.18 Advanced Analytics (Phase 13)
+`GET /api/dashboard/charts/{monthly-procurement-spending|purchase-trends|inventory-value-by-supplier|top-suppliers|top-products|department-spending|stock-movement|goods-received-by-month|pending-approvals|low-stock-trend}` — most return `ChartDataPoint[]` (`{ label, value }`), directly usable by any charting library (Recharts/Chart.js: map straight to `[{ name: label, value }]`). `top-products` returns `TopProductResponse[]`; `department-spending` returns `DepartmentSpendingChartResponse[]`.
 
-### 3.8 Purchase Requests (Phase 3)
-| Method | Endpoint | Auth | Body → Response |
-|---|---|---|---|
-| GET | `/api/purchase-requests` | ADMIN, STORE_MANAGER, PROCUREMENT_MANAGER, FINANCE_MANAGER | → `PurchaseRequestResponse[]` |
-| GET | `/api/purchase-requests/my-requests` | All roles | → `PurchaseRequestResponse[]` (current user's own) |
-| GET | `/api/purchase-requests/{id}` | All roles | → `PurchaseRequestResponse` |
-| GET | `/api/purchase-requests/search?status=&employeeId=&department=&priority=` | Managers/Admin | → `PurchaseRequestResponse[]` |
-| POST | `/api/purchase-requests` | All roles | `PurchaseRequestRequest` → `PurchaseRequestResponse` (201, status `DRAFT`) |
-| PUT | `/api/purchase-requests/{id}` | All roles | `PurchaseRequestUpdateRequest` → `PurchaseRequestResponse` (only while `DRAFT`) |
-| PATCH | `/api/purchase-requests/{id}/submit` | All roles | → `PurchaseRequestResponse` |
-| PATCH | `/api/purchase-requests/{id}/cancel` | All roles | → `PurchaseRequestResponse` |
+### 3.19 Audit Logs (Phase 18, ADMIN only)
+`GET /api/audit-logs`, `GET /api/audit-logs/search?userId=&module=&action=&fromDate=&toDate=` → `AuditLogResponse[]`: `{ id, userId, username, action, module, entityId, oldValue, newValue, ipAddress, timestamp }`.
 
-`PurchaseRequestRequest`:
-```json
-{
-  "department": "Information Technology",
-  "items": [
-    { "productId": "...", "requestedQuantity": 5, "estimatedUnitPrice": 65.0, "notes": "optional" }
-  ],
-  "purpose": "string",
-  "businessJustification": "string",
-  "priority": "LOW | MEDIUM | HIGH | EMERGENCY",
-  "requiredDate": "ISO-8601, must be in the future",
-  "remarks": "optional"
-}
-```
-
-`PurchaseRequestResponse` (key fields): `prNumber` (auto, e.g. `PR-0005`), `status` (`DRAFT|SUBMITTED|UNDER_REVIEW|APPROVED|PARTIALLY_APPROVED|REJECTED|CANCELLED|CONVERTED_TO_PO`), `currentApprovalLevel` (`STORE_MANAGER|PROCUREMENT_MANAGER|FINANCE_MANAGER|ADMIN|null`), `estimatedTotal` (auto-computed), `items[]` with `estimatedLineTotal` per line.
-
-**Business rules the UI must respect:**
-- `PUT` (update) only works while `status === "DRAFT"` — hide/disable the Edit button otherwise.
-- `submit` moves `DRAFT → SUBMITTED` and sets `currentApprovalLevel = STORE_MANAGER`, **unless** `priority === "EMERGENCY"`, in which case it jumps straight to `APPROVED` with no approval steps — show a distinct "Emergency — auto-approved" badge in that case.
-- `cancel` is blocked once `status === "CONVERTED_TO_PO"` (409 error) — hide the Cancel button in that state.
-
-### 3.9 Approval Workflow (Phase 4)
-| Method | Endpoint | Auth | Body → Response |
-|---|---|---|---|
-| GET | `/api/approvals/{purchaseRequestId}/history` | All roles | → `ApprovalHistoryResponse[]` (chronological) |
-| POST | `/api/approvals/{prId}/store-manager` | ADMIN, STORE_MANAGER | `ApprovalDecisionRequest` → `ApprovalHistoryResponse` |
-| POST | `/api/approvals/{prId}/procurement-manager` | ADMIN, PROCUREMENT_MANAGER | same |
-| POST | `/api/approvals/{prId}/finance-manager` | ADMIN, FINANCE_MANAGER | same |
-| POST | `/api/approvals/{prId}/override?comments=` | ADMIN | → `ApprovalHistoryResponse` |
-
-`ApprovalDecisionRequest`: `{ "decision": "APPROVED | REJECTED | RETURN_FOR_CHANGES", "comments": "optional" }`.
-
-**Workflow logic the UI should reflect (already enforced server-side, but mirror it for good UX):**
-- Sequence: `STORE_MANAGER → PROCUREMENT_MANAGER → FINANCE_MANAGER` (Finance step only appears if `estimatedTotal >= 5000`).
-- Only call the endpoint matching `purchaseRequest.currentApprovalLevel` — e.g. don't show the "Procurement Manager Approve" button unless `currentApprovalLevel === "PROCUREMENT_MANAGER"`.
-- `APPROVED` decision advances `currentApprovalLevel` to the next stage (or to `null` + request `status = APPROVED` if this was the last stage).
-- `REJECTED` sets `status = REJECTED`, ends the workflow.
-- `RETURN_FOR_CHANGES` sets `status = DRAFT` back — the employee must edit and resubmit.
-- `override` (ADMIN only) immediately approves regardless of current stage — show this as a distinct "Emergency Override" action, visually separated from normal approve/reject buttons.
-- A `409` here almost always means "someone already acted on this, or it's not at this stage" — refetch the request and show the current state instead of retrying blindly.
-
-### 3.10 Purchase Orders (Phase 5)
-| Method | Endpoint | Auth | Body → Response |
-|---|---|---|---|
-| GET | `/api/purchase-orders` (+ `/{id}`, `/status/{status}`, `/supplier/{supplierId}`) | ADMIN, STORE_MANAGER, PROCUREMENT_MANAGER, FINANCE_MANAGER | → `PurchaseOrderResponse[]` |
-| POST | `/api/purchase-orders/from-request/{purchaseRequestId}` | ADMIN, PROCUREMENT_MANAGER | `PurchaseOrderCreateRequest` → `PurchaseOrderResponse` (201) |
-| PATCH | `/api/purchase-orders/{id}/issue` | ADMIN, PROCUREMENT_MANAGER | → `PurchaseOrderResponse` |
-| PATCH | `/api/purchase-orders/{id}/mark-email-sent` | ADMIN, PROCUREMENT_MANAGER | → `PurchaseOrderResponse` |
-| PATCH | `/api/purchase-orders/{id}/cancel` | ADMIN, PROCUREMENT_MANAGER | → `PurchaseOrderResponse` |
-
-`PurchaseOrderCreateRequest`:
-```json
-{
-  "items": [ { "productId": "...", "orderedQuantity": 5, "unitPrice": 65.0, "taxRate": 5.0, "discount": 0.0 } ],
-  "supplierIdOverride": "optional, ADMIN only",
-  "shipping": 15.0,
-  "currency": "USD",
-  "expectedDeliveryDate": "ISO-8601, must be in the future"
-}
-```
-
-**Business rules:**
-- Only callable when the source `PurchaseRequest.status === "APPROVED"` (409 otherwise).
-- Supplier is derived automatically from the first item's product — don't show a supplier picker unless the user is ADMIN, in which case show `supplierIdOverride` as an optional field.
-- `subtotal`, `taxTotal`, `discountTotal`, `grandTotal` are all computed server-side — display them, don't recompute client-side (except for a live preview before submit, which is fine as a UX nicety).
-- Status lifecycle: `DRAFT → ISSUED (→ EMAIL_SENT) → PARTIALLY_RECEIVED → COMPLETED`, or `CANCELLED` at any point before `COMPLETED`. Show `timeline[]` as a vertical stepper/history on the PO detail page.
-- Creating the PO automatically flips the source Purchase Request to `CONVERTED_TO_PO`.
-
-### 3.11 Goods Receipt / GRN (Phase 6)
-| Method | Endpoint | Auth | Body → Response |
-|---|---|---|---|
-| GET | `/api/goods-receipts` (+ `/{id}`, `/purchase-order/{poId}`) | ADMIN, STORE_MANAGER, PROCUREMENT_MANAGER | → `GoodsReceiptResponse[]` |
-| POST | `/api/goods-receipts/purchase-order/{purchaseOrderId}` | ADMIN, STORE_MANAGER | `GoodsReceiptCreateRequest` → `GoodsReceiptResponse` (201) |
-
-`GoodsReceiptCreateRequest`:
-```json
-{
-  "items": [
-    { "productId": "...", "receivedQuantity": 5, "rejectedQuantity": 0, "batchNumber": "optional", "serialNumbers": ["optional"], "expiryDate": "optional ISO-8601" }
-  ],
-  "warehouse": "string",
-  "storageLocation": "string",
-  "inspectionStatus": "PENDING | PASSED | FAILED | PARTIAL_PASS",
-  "qualityNotes": "optional"
-}
-```
-
-**Business rules — this is the only screen in the whole app that increases inventory:**
-- Only callable when the PO is `ISSUED`, `EMAIL_SENT`, or `PARTIALLY_RECEIVED` (409 otherwise — e.g. can't receive against a `DRAFT` or `CANCELLED` PO).
-- `receivedQuantity` per line cannot exceed the PO line's remaining unreceived quantity — the server rejects with a 409 naming the exact remaining amount; surface that message directly.
-- `rejectedQuantity ≤ receivedQuantity`.
-- The PO automatically becomes `PARTIALLY_RECEIVED` or `COMPLETED` depending on whether every line is now fully received — refetch the PO after a successful GRN and update the UI accordingly.
-- Support multiple GRNs against one PO (partial deliveries) — the GRN list/detail page for a PO should show every receipt, not just the latest.
-
-### 3.12 Dashboard
-| Method | Endpoint | Auth | Response |
-|---|---|---|---|
-| GET | `/api/dashboard` | ADMIN, STORE_MANAGER | `DashboardResponse` |
-
-```json
-{
-  "totalProducts": 7, "totalInventoryItems": 229, "lowStockProducts": 2, "outOfStockProducts": 0,
-  "totalIssuedProducts": 0, "productsNeedingPurchase": 2,
-  "totalSuppliers": 5, "activeSuppliers": 5, "inactiveSuppliers": 0,
-  "pendingPurchaseRequests": 1, "approvedPurchaseRequests": 1, "rejectedPurchaseRequests": 1, "itemsWaitingApproval": 1,
-  "totalPurchaseOrders": 1, "pendingPurchaseOrders": 0, "completedPurchaseOrders": 1,
-  "totalGoodsReceipts": 1, "pendingDeliveries": 0,
-  "monthlyProcurementSpend": 2872.50, "inventoryValue": 24387.75,
-  "topSuppliers": [ { "supplierId": "...", "supplierName": "Tech Solutions Ltd", "totalPurchaseOrderValue": 2872.50, "purchaseOrderCount": 1 } ]
-}
-```
+### 3.20 Dashboard (extended)
+`GET /api/dashboard` now also returns: `totalCategories`, `totalAnnualBudget`, `totalReservedBudget`, `totalSpentBudget`, `averageBudgetUtilizationPercentage`, `departmentsOverBudget`, `openStockWarnings` — add these as additional stat cards / a budget-utilization gauge.
 
 ---
 
@@ -290,156 +132,144 @@ Populate the Supplier dropdown on the Product form from `GET /api/suppliers/acti
 
 ```
 Login
-└── App Shell (sidebar + navbar, role-gated items)
-    ├── Dashboard                (ADMIN, STORE_MANAGER)
-    ├── Products                 (all roles view; ADMIN manages)
-    ├── Inventory                (ADMIN, STORE_MANAGER)
-    ├── Stock Issues             (ADMIN, STORE_MANAGER)
-    ├── Suppliers                (ADMIN full; STORE_MANAGER view/search)
-    ├── Departments              (ADMIN)
+└── App Shell (sidebar + navbar with notification bell, role-gated)
+    ├── Dashboard                         (ADMIN, STORE_MANAGER)
+    ├── Products                          (all view; ADMIN manages) — supports paginated table
+    ├── Categories                        (ADMIN) — tree view, main + sub
+    ├── Inventory                         (ADMIN, STORE_MANAGER)
+    ├── Stock Issues                      (ADMIN, STORE_MANAGER)
+    ├── Suppliers                         (ADMIN full; STORE_MANAGER/PROCUREMENT_MANAGER view)
+    │   └── Supplier Detail → Performance tab (Phase 12 scorecard)
+    ├── Departments                       (ADMIN)
+    ├── Budgets                           (ADMIN, FINANCE_MANAGER edit; PROCUREMENT_MANAGER view)
     ├── Purchase Requests
-    │   ├── My Requests          (all roles)
-    │   ├── All Requests         (ADMIN, STORE_MANAGER, PROCUREMENT_MANAGER, FINANCE_MANAGER)
-    │   ├── Request Detail       (includes embedded Approval History timeline)
-    │   └── New/Edit Request Form
-    ├── Approvals Inbox          (role-filtered: show only requests awaiting the viewer's level)
+    │   ├── My Requests / All Requests / Detail (with Timeline + Attachments tabs) / Form
+    ├── Approvals Inbox
     ├── Purchase Orders
-    │   ├── All Purchase Orders  (managers/admin)
-    │   ├── PO Detail            (includes timeline + linked Goods Receipts)
-    │   └── Create PO (from an approved request)
+    │   ├── List / Detail (Timeline + Attachments + linked Goods Receipts) / Create-from-request Form
     ├── Goods Receipts
-    │   ├── All Goods Receipts   (ADMIN, STORE_MANAGER, PROCUREMENT_MANAGER)
-    │   └── Record GRN (against a PO)
-    └── Users                    (ADMIN)
+    ├── Reports                           (managers/admin) — filter panel + JSON table + CSV download button
+    ├── Analytics / Charts                (managers/admin) — the Phase 13 chart grid
+    ├── Notifications                     (all roles) — full history page behind the navbar bell
+    ├── Audit Logs                        (ADMIN)
+    └── Users                             (ADMIN)
 ```
 
-### Role-based menu visibility
+### Role-based menu visibility (additions over the Phase 6 table)
 | Nav item | ADMIN | STORE_MANAGER | PROCUREMENT_MANAGER | FINANCE_MANAGER | EMPLOYEE |
 |---|:---:|:---:|:---:|:---:|:---:|
-| Dashboard | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Products | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Inventory | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Stock Issues | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Suppliers | ✅ | ✅ (view/search only) | ❌ | ❌ | ❌ |
-| Departments | ✅ | ❌ | ❌ | ❌ | ❌ |
-| My Purchase Requests | ✅ | ✅ | ✅ | ✅ | ✅ |
-| All Purchase Requests | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Approvals Inbox | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Purchase Orders | ✅ | ✅ (view only) | ✅ | ✅ (view only) | ❌ |
-| Goods Receipts | ✅ | ✅ | ✅ (view only) | ❌ | ❌ |
-| Users | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Categories | Yes | No | No | No | No |
+| Budgets | Yes | No | View only | Yes | No |
+| Reports | Yes | Yes | Yes | Yes | No |
+| Analytics | Yes | Yes | Yes | Yes | No |
+| Audit Logs | Yes | No | No | No | No |
+| Notifications | Yes | Yes | Yes | Yes | Yes |
 
 ---
 
-## 5. Screen-by-Screen Suggestions
+## 5. Screen Notes for New Modules
 
-### Login
-- Email + password form, "Login" button, inline error banner on 401.
-- Redirect to Dashboard (ADMIN/STORE_MANAGER) or My Purchase Requests (everyone else) after login.
+### Reports page
+- Left panel: report picker (10 reports) + filter form (date range picker, department/supplier/status/employee/category selects as relevant to the chosen report).
+- Right panel: results table (client-paginate the JSON `rows[]` if large) + a "Download CSV" button that re-issues the same request with `format=csv`.
 
-### Dashboard
-- Stat cards: Total Products, Low/Out-of-Stock counts, Total Suppliers (active/inactive), Pending/Approved/Rejected Purchase Requests, Pending/Completed Purchase Orders, Pending Deliveries, Monthly Procurement Spend, Inventory Value.
-- Chart suggestions: bar chart for "Top Suppliers by PO value", donut chart for Purchase Request status breakdown, donut for Product stock status breakdown.
-- Table: "Procurement Recommendations" (from `/api/inventory/procurement-recommendations`).
+### Analytics / Charts page
+- Grid of chart cards, one per endpoint in section 3.18. Suggested chart types: line chart for monthly spending/trends/goods-received-by-month, bar chart for top suppliers/products/department spending/low-stock-trend, donut for pending-approvals-by-level.
 
-### Products
-- Table with Supplier column (clickable → Supplier detail), Status badge.
-- Add/Edit modal includes a required Supplier dropdown (populate from `/api/suppliers/active`).
+### Budgets page
+- Table: Department, Annual Budget, Reserved, Spent, Available, Utilization % (progress bar colored by `warningLevel`).
+- Edit modal (ADMIN/FINANCE_MANAGER): single field, Annual Budget — reserved/spent are always read-only displays.
 
-### Purchase Requests — List
-- Tabs: "My Requests" / "All Requests" (managers/admin only).
-- Filters: status, department, priority (wire to `/search`).
-- Status badges (suggested colors): `DRAFT` gray, `SUBMITTED`/`UNDER_REVIEW` blue, `APPROVED`/`PARTIALLY_APPROVED` green, `REJECTED` red, `CANCELLED` gray-strikethrough, `CONVERTED_TO_PO` purple.
-- Priority badges: `LOW` gray, `MEDIUM` blue, `HIGH` orange, `EMERGENCY` red (pulsing/bold treatment recommended — it bypasses approval entirely).
-- Row actions: View, Edit (only if `DRAFT`), Submit (only if `DRAFT`), Cancel (only if not `CONVERTED_TO_PO`/`CANCELLED`).
+### Categories page
+- Tree/accordion view: main categories expandable to show subcategories.
+- Add Subcategory action available directly from a main category row (pre-fills `parentCategoryId`).
+- Deleting a category with active subcategories is blocked server-side (`409`) — show that message inline rather than a generic error.
 
-### Purchase Request — Detail
-- Header: PR number, status badge, priority badge, estimated total.
-- Line items table with product, quantity, estimated unit price, line total.
-- Embedded **Approval History timeline** (from `/api/approvals/{id}/history`): level, approver, decision (color-coded), comments, timestamp.
-- If viewer's role matches `currentApprovalLevel` (or is ADMIN): show Approve / Reject / Return-for-Changes buttons with a comments textarea, plus an "Override" button for ADMIN.
-- If `status === "APPROVED"` and viewer is ADMIN/PROCUREMENT_MANAGER: show a "Create Purchase Order" button linking to the PO creation form pre-filled with this request's items.
+### Attachments (embedded in Purchase Request / Purchase Order detail pages)
+- "Attachments" tab: table of uploaded files (name, type, size, uploader, date) + a drag-and-drop or file-picker upload widget with a Document Type selector.
+- Download icon → `GET /{id}/download` (open in new tab or trigger blob download).
+- Delete icon with confirmation.
 
-### Purchase Request — New/Edit Form
-- Department dropdown (from `/api/departments`).
-- Dynamic line-item rows: Product dropdown (from `/api/products`), Quantity, Estimated Unit Price (can prefill from `product.unitPrice`), Notes. "Add item" / "Remove item" buttons.
-- Purpose, Business Justification (textareas), Priority dropdown, Required Date (date picker, must be future), Remarks (optional).
-- Save as Draft vs. Save & Submit (two buttons — the latter calls create then immediately `PATCH .../submit`).
+### Notifications page / bell dropdown
+- Bell icon in navbar shows `unreadCount` as a badge; clicking opens a dropdown of the 5-10 most recent (from `/unread` or `/` sliced client-side) with a "View all" link to the full Notifications page.
+- Each item click marks it read (`PATCH /{id}/read`) and deep-links via `relatedEntityType`/`relatedEntityId` (e.g. `PurchaseRequest` → `/purchase-requests/{id}`).
+- "Mark all as read" button at the top of the full page.
 
-### Approvals Inbox
-- List purchase requests where `currentApprovalLevel` matches the viewer's role (client-side filter of `/api/purchase-requests` or `/search?status=SUBMITTED&status=UNDER_REVIEW`, then filter by `currentApprovalLevel` client-side, since there's no dedicated "my inbox" endpoint yet).
-- Same row actions as the Purchase Request detail page's approval section, but accessible in bulk/list form.
+### Audit Logs page (ADMIN)
+- Filter bar: user, module, action, date range.
+- Table: Timestamp, User, Action (badge), Module, Entity ID, Old → New value (monospace, truncated with a "view full" expandable row).
 
-### Purchase Orders — List & Detail
-- List: PO number, supplier, grand total, status badge, expected delivery date.
-- Status badges: `DRAFT` gray, `ISSUED`/`EMAIL_SENT` blue, `PARTIALLY_RECEIVED` orange, `COMPLETED` green, `CANCELLED` red.
-- Detail: items table with ordered/received quantity progress bar per line, financial summary (subtotal/tax/discount/shipping/grand total), vertical timeline component driven by `timeline[]`.
-- Actions: Issue (if `DRAFT`), Mark Email Sent (if `ISSUED`), Cancel (if not `COMPLETED`/`CANCELLED`), "Record Goods Receipt" (if `ISSUED`/`EMAIL_SENT`/`PARTIALLY_RECEIVED`) linking to the GRN form pre-filled with remaining quantities per line.
-
-### Goods Receipt — List & Form
-- List grouped/filterable by PO.
-- Form: pre-fill each line's max receivable quantity from `orderedQuantity - receivedQuantity` (compute client-side from the PO detail response); Warehouse, Storage Location, Inspection Status dropdown, Quality Notes.
-- On submit success, show a success toast naming the new PO status ("Purchase Order PO-0002 is now COMPLETED" or "... PARTIALLY_RECEIVED").
-
-### Suppliers, Departments, Users
-- Same list/detail/modal CRUD pattern as Products — keep visual consistency across all "master data" screens.
+### Purchase Request / Purchase Order detail — Timeline tab
+- Vertical stepper/timeline component fed by `timeline[]` — icon per status, remarks as the secondary line, actor name + timestamp as metadata.
 
 ---
 
-## 6. UI/UX Conventions
+## 6. Suggested React Component Architecture
 
-- **Loading states:** skeleton rows/cards for tables and dashboard stat cards; spinner on buttons during submit.
-- **Empty states:** friendly message + primary action (e.g. "No purchase requests yet — Create one" for My Requests).
-- **Toasts:** success (green) on every successful POST/PUT/PATCH/DELETE; error (red) using the `message` field verbatim from the error response body.
-- **Confirmation dialogs:** required before Delete (Users/Products/Suppliers/Departments), Cancel (Purchase Request/Purchase Order), and Reject/Override approval actions.
-- **Status badge color palette (suggested, reuse across all modules):** gray = draft/inactive/cancelled, blue = in-progress/submitted, orange = partial/warning, green = approved/completed/active, red = rejected/out-of-stock/error, purple = converted/terminal-success.
-
----
-
-## 7. JavaScript Fetch Examples
-
-```javascript
-async function apiRequest(method, path, token, body) {
-  const response = await fetch(`http://localhost:8080${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-    },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  if (response.status === 204) return null;
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.message || 'Request failed');
-  return data;
-}
-
-// Login
-const { token, role } = await apiRequest('POST', '/api/auth/login', null, { email, password });
-
-// Create a Purchase Request, then submit it
-const pr = await apiRequest('POST', '/api/purchase-requests', token, prPayload);
-await apiRequest('PATCH', `/api/purchase-requests/${pr.id}/submit`, token);
-
-// Store Manager approves
-await apiRequest('POST', `/api/approvals/${pr.id}/store-manager`, token, { decision: 'APPROVED', comments: 'Looks good' });
-
-// Procurement Manager converts an approved request into a PO
-const po = await apiRequest('POST', `/api/purchase-orders/from-request/${pr.id}`, token, poPayload);
-await apiRequest('PATCH', `/api/purchase-orders/${po.id}/issue`, token);
-
-// Store Manager records a Goods Receipt (increases stock)
-const grn = await apiRequest('POST', `/api/goods-receipts/purchase-order/${po.id}`, token, grnPayload);
+```
+src/
+├── api/                     one file per backend module (axios/fetch wrapper + typed calls),
+│                            mirroring the backend's dto/ subfolders 1:1 — see table below
+├── components/
+│   ├── common/              Table, Modal, Pagination, StatusBadge, ConfirmDialog, Toast,
+│   │                        EmptyState, LoadingSkeleton, FilterBar, DateRangePicker
+│   ├── layout/               AppShell, Sidebar, Navbar, NotificationBell, RoleGuard
+│   ├── charts/                ChartCard (wraps Recharts/Chart.js), reused by Dashboard + Analytics
+│   └── domain/                ApprovalTimeline, PurchaseOrderTimeline, AttachmentList,
+│                              AttachmentUploader, BudgetUtilizationBar, CategoryTree,
+│                              SupplierDropdown, ProductDropdown, DepartmentDropdown
+├── pages/                   one folder per nav item in section 4, each with List/Detail/Form
+│                            subcomponents as needed
+├── hooks/                    useAuth, usePagination, useNotifications (polling), useDebouncedSearch
+├── context/                   AuthContext (token, role, user), NotificationContext
+└── utils/                     constants (status enums, role list, badge color map), validators,
+                              dateUtils, csvDownload
 ```
 
----
+### `api/` to backend controller mapping
+| `api/*.ts` | Backend controller |
+|---|---|
+| `authApi` | AuthController |
+| `productApi`, `categoryApi` | ProductController, CategoryController |
+| `supplierApi`, `supplierPerformanceApi` | SupplierController, SupplierPerformanceController |
+| `departmentApi`, `budgetApi` | DepartmentController, BudgetController |
+| `purchaseRequestApi` | PurchaseRequestController |
+| `approvalApi` | ApprovalController |
+| `purchaseOrderApi` | PurchaseOrderController |
+| `goodsReceiptApi` | GoodsReceiptController |
+| `attachmentApi` | AttachmentController |
+| `notificationApi` | NotificationController |
+| `reportApi` | ReportController |
+| `analyticsApi` | AnalyticsController |
+| `auditLogApi` | AuditLogController |
+| `dashboardApi` | DashboardController |
 
-## 8. Integration Checklist
+## 7. API Integration Sequence (build order)
 
-1. Start MongoDB and the backend (see `README.md`), confirm `http://localhost:8080/swagger-ui.html` loads.
-2. Point the frontend's API base URL at `http://localhost:8080`.
-3. Build a shared `apiRequest`/Axios-interceptor helper that attaches the token and handles `401` globally.
-4. Use `role` from login to drive the nav menu (Section 4) and page guards.
-5. Test the full workflow via `postman_collection.json` first: create PR → submit → approve at each level → create PO → issue → record GRN → confirm stock increased and dashboard numbers update.
-6. Build master-data screens (Products, Suppliers, Departments, Users) first — they share one CRUD pattern — then layer the workflow screens (Purchase Requests → Approvals → Purchase Orders → Goods Receipts) on top, since each depends on the one before it.
-7. CORS is open (`*`) by default in this build for local development — restrict `allowedOriginPatterns` in `SecurityConfig.kt` before deploying to production.
+1. Auth + role-gated shell (navbar/sidebar) first — everything else depends on it.
+2. Master data screens sharing one CRUD pattern: Products, Categories, Suppliers, Departments, Users.
+3. Budgets (depends on Departments existing).
+4. Purchase Request create/edit/submit/cancel + My Requests / All Requests lists.
+5. Approvals Inbox + approval actions on the PR detail page (depends on step 4).
+6. Purchase Orders (depends on approved PRs from step 5).
+7. Goods Receipt (depends on issued POs from step 6) — verify stock actually increases end-to-end here.
+8. Attachments (embed into PR/PO detail pages — can be built in parallel with steps 4-7).
+9. Notifications (bell + full page — can be built any time after step 1, since it's read-only against seeded/real data).
+10. Reports + Analytics + Supplier Performance + Dashboard extensions (read-only, build last, exercise the richest data set).
+11. Audit Logs (ADMIN-only, lowest priority).
+
+## 8. Validation, Loading, and Empty States
+
+- Mirror every Bean Validation constraint client-side for instant feedback, but always treat the server's `400`/`409` as the source of truth (network latency, race conditions).
+- Loading: skeleton rows for tables, skeleton cards for dashboard/analytics, spinner on submit buttons.
+- Empty states: every list screen needs a friendly "nothing here yet" state with a primary action where applicable (e.g. Notifications: "You're all caught up").
+- Toasts: green on success, red on error using `message` verbatim, amber for warnings (e.g. a `NEARLY_EXHAUSTED` budget shown after a PR create that doesn't block submission).
+
+## 9. Integration Checklist
+
+1. Start MongoDB + backend, confirm `http://localhost:8080/swagger-ui.html`.
+2. Point the frontend at `http://localhost:8080`; centralize the fetch/axios instance with a token interceptor and global `401` handling.
+3. Import `postman_collection.json` and walk the full workflow once manually: PR → submit → approve x N → PO → issue → GRN → confirm stock + budget + dashboard numbers all move together.
+4. Build in the order given in section 7.
+5. CORS is open (`*`) for local development — restrict `allowedOriginPatterns` in `SecurityConfig.kt` before production deployment.
+6. `UPLOAD_DIR` must point to a writable, persistent directory in any real deployment (local disk attachments are lost on ephemeral containers) — see README.md section 15 for the cloud-storage migration path.

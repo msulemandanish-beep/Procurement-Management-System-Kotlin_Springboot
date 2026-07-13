@@ -59,6 +59,25 @@ class PurchaseRequestController(
         return ResponseEntity.ok(purchaseRequestService.searchRequests(status, employeeId, department, priority))
     }
 
+    @GetMapping("/page")
+    @PreAuthorize("hasAnyRole('ADMIN', 'STORE_MANAGER', 'PROCUREMENT_MANAGER', 'FINANCE_MANAGER')")
+    @Operation(
+        summary = "Get a paginated, sortable, searchable page of purchase requests",
+        description = "Phase 14/15: supports page, size, sort field (createdAt|estimatedTotal|prNumber|requiredDate), direction (ASC|DESC), free-text search, and status/department/priority filters"
+    )
+    fun getRequestsPage(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+        @RequestParam(defaultValue = "createdAt") sort: String,
+        @RequestParam(defaultValue = "DESC") direction: String,
+        @RequestParam(required = false) status: PurchaseRequestStatus?,
+        @RequestParam(required = false) department: String?,
+        @RequestParam(required = false) priority: Priority?,
+        @RequestParam(required = false) search: String?
+    ): ResponseEntity<com.company.procurement.dto.common.PagedResponse<PurchaseRequestResponse>> {
+        return ResponseEntity.ok(purchaseRequestService.getRequestsPage(page, size, sort, direction, status, department, priority, search))
+    }
+
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'STORE_MANAGER', 'PROCUREMENT_MANAGER', 'FINANCE_MANAGER', 'EMPLOYEE')")
     @Operation(summary = "Create purchase request", description = "Create a new purchase request in DRAFT status")

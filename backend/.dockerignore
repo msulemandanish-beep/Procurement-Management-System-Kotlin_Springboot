@@ -1,0 +1,16 @@
+.git
+.gitignore
+.gradle
+build/
+out/
+*.iml
+.idea
+.vscode
+uploads/
+*.log
+.env
+.env.local
+README.md
+FRONTEND_HANDOFF.md
+SYSTEM_REPOTREE.md
+postman_collection.json

@@ -6,6 +6,8 @@ import com.company.procurement.dto.purchaseorder.PurchaseOrderResponse
 import com.company.procurement.dto.purchaseorder.PurchaseOrderTimelineEntryResponse
 import com.company.procurement.exception.BusinessException
 import com.company.procurement.exception.ResourceNotFoundException
+import com.company.procurement.model.AuditAction
+import com.company.procurement.model.NotificationType
 import com.company.procurement.model.PurchaseOrder
 import com.company.procurement.model.PurchaseOrderItem
 import com.company.procurement.model.PurchaseOrderStatus
@@ -24,7 +26,9 @@ class PurchaseOrderService(
     private val purchaseOrderRepository: PurchaseOrderRepository,
     private val purchaseRequestService: PurchaseRequestService,
     private val productService: ProductService,
-    private val supplierService: SupplierService
+    private val supplierService: SupplierService,
+    private val notificationService: NotificationService,
+    private val auditLogService: AuditLogService
 ) {
 
     private val logger = LoggerFactory.getLogger(PurchaseOrderService::class.java)
@@ -129,6 +133,16 @@ class PurchaseOrderService(
         )
         purchaseRequestService.saveRequest(updatedRequest)
 
+        auditLogService.log(AuditAction.CREATE, "PurchaseOrder", saved.id, newValue = "poNumber=${saved.poNumber}, grandTotal=${saved.grandTotal}")
+        notificationService.notify(
+            recipientId = purchaseRequest.employeeId,
+            type = NotificationType.PURCHASE_ORDER_CREATED,
+            title = "Purchase order created",
+            message = "Purchase Order ${saved.poNumber} was created from your request ${purchaseRequest.prNumber}.",
+            relatedEntityType = "PurchaseOrder",
+            relatedEntityId = saved.id
+        )
+
         logger.info("Created purchase order '{}' from purchase request '{}'", saved.poNumber, purchaseRequest.prNumber)
 
         return saved.toResponse()
@@ -141,7 +155,20 @@ class PurchaseOrderService(
             throw BusinessException("Only Purchase Orders in DRAFT status can be issued. Current status: ${order.status}")
         }
 
-        return transitionStatus(order, PurchaseOrderStatus.ISSUED, "Purchase Order issued to supplier")
+        val response = transitionStatus(order, PurchaseOrderStatus.ISSUED, "Purchase Order issued to supplier")
+        auditLogService.log(AuditAction.ISSUE, "PurchaseOrder", order.id, newValue = "status=ISSUED")
+
+        val purchaseRequest = purchaseRequestService.getRequestEntityById(order.purchaseRequestId)
+        notificationService.notify(
+            recipientId = purchaseRequest.employeeId,
+            type = NotificationType.PURCHASE_ORDER_ISSUED,
+            title = "Purchase order issued",
+            message = "Purchase Order ${order.poNumber} has been issued to ${order.supplierName}.",
+            relatedEntityType = "PurchaseOrder",
+            relatedEntityId = order.id
+        )
+
+        return response
     }
 
     fun markEmailSent(id: String): PurchaseOrderResponse {
@@ -164,7 +191,9 @@ class PurchaseOrderService(
             throw BusinessException("Purchase Order '${order.poNumber}' is already cancelled")
         }
 
-        return transitionStatus(order, PurchaseOrderStatus.CANCELLED, "Purchase Order cancelled")
+        val response = transitionStatus(order, PurchaseOrderStatus.CANCELLED, "Purchase Order cancelled")
+        auditLogService.log(AuditAction.CANCEL, "PurchaseOrder", order.id, newValue = "status=CANCELLED")
+        return response
     }
 
     /**
@@ -177,6 +206,37 @@ class PurchaseOrderService(
 
     fun countByStatus(status: PurchaseOrderStatus): Long {
         return purchaseOrderRepository.countByStatus(status)
+    }
+
+    /** Paginated, sortable, text-searchable listing (Phase 14/15). */
+    fun getOrdersPage(
+        page: Int,
+        size: Int,
+        sortBy: String,
+        direction: String,
+        status: PurchaseOrderStatus?,
+        supplierId: String?,
+        search: String?
+    ): com.company.procurement.dto.common.PagedResponse<PurchaseOrderResponse> {
+        val filtered = purchaseOrderRepository.findAll()
+            .asSequence()
+            .filter { status == null || it.status == status }
+            .filter { supplierId == null || it.supplierId == supplierId }
+            .filter {
+                search.isNullOrBlank() ||
+                    it.poNumber.contains(search, ignoreCase = true) ||
+                    it.supplierName.contains(search, ignoreCase = true)
+            }
+            .toList()
+
+        val sortSelector: (PurchaseOrder) -> Comparable<*> = when (sortBy) {
+            "grandTotal" -> { o -> o.grandTotal }
+            "poNumber" -> { o -> o.poNumber }
+            "expectedDeliveryDate" -> { o -> o.expectedDeliveryDate }
+            else -> { o -> o.createdAt }
+        }
+
+        return com.company.procurement.util.PaginationUtil.paginate(filtered, page, size, sortSelector, direction) { it.toResponse() }
     }
 
     private fun transitionStatus(order: PurchaseOrder, newStatus: PurchaseOrderStatus, remarks: String): PurchaseOrderResponse {

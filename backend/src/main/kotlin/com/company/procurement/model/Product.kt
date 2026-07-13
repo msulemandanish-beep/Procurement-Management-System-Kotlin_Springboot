@@ -1,6 +1,7 @@
 package com.company.procurement.model
 
 import org.springframework.data.annotation.Id
+import org.springframework.data.mongodb.core.index.Indexed
 import org.springframework.data.mongodb.core.mapping.Document
 import java.time.Instant
 
@@ -13,7 +14,23 @@ data class Product(
 
     val description: String,
 
-    val category: String,
+    /**
+     * Replaces the Phase 1-8 free-text category string (Phase 9). References a
+     * Category document; ProductService validates it exists and ProductResponse
+     * embeds a CategorySummary so the frontend never needs a second lookup.
+     */
+    val categoryId: String,
+
+    @Indexed(unique = true, sparse = true)
+    val sku: String? = null,
+
+    val barcode: String? = null,
+
+    val unitOfMeasure: String = "EA",
+
+    val currency: String = "USD",
+
+    val imageUrl: String? = null,
 
     val unitPrice: Double,
 
@@ -24,6 +41,9 @@ data class Product(
     val supplierId: String,
 
     val status: ProductStatus = deriveStatus(currentStock, minimumStock),
+
+    /** Soft-delete flag (Phase 16). Historical PR/PO/GRN references remain intact. */
+    val deleted: Boolean = false,
 
     val createdAt: Instant = Instant.now(),
 

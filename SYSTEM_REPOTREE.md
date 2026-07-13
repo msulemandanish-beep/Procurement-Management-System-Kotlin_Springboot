@@ -1,217 +1,229 @@
 # SYSTEM_REPOTREE.md — Complete Architecture Reference
 
-This document is the single reference for the entire Procurement Management System's file/folder structure — backend (as built) and frontend (as recommended). It explains what every folder and file is for, and how they relate to each other. Use this alongside `README.md` (business/API reference) and `FRONTEND_HANDOFF.md` (API contract + UI guidance).
+The single reference for every file in this system, backend (as built) and frontend (as recommended), across all 18 phases. Read alongside `README.md` (business/API reference) and `FRONTEND_HANDOFF.md` (UI guidance).
 
 ---
 
 ## PART 1 — BACKEND
 
-```
-backend/
-├── build.gradle.kts            Gradle Kotlin DSL build script: dependencies, plugins, JVM target
-├── settings.gradle.kts         Gradle root project name
-├── gradle.properties           Kotlin/Gradle global properties
-├── .env.example                Template for local environment variables (Mongo URI, JWT secret, port)
-├── .gitignore                  Standard Kotlin/Gradle/IDE ignore rules
-├── postman_collection.json     Importable Postman collection covering every endpoint, all 6 phases
-├── README.md                   Business + API + architecture reference (this system's "what and why")
-├── FRONTEND_HANDOFF.md         Complete API contract + UI guidance for frontend developers
-├── SYSTEM_REPOTREE.md          This file — the "where is everything" reference
-└── src/main/
-    ├── kotlin/com/company/procurement/     all application code lives under this package root
-    └── resources/                          Spring configuration files (see Part 1.9)
-```
+### 1.0 Root files
 
-### 1.1 `ProcurementApplication.kt`
-The single `@SpringBootApplication` entry point. `fun main()` calls `runApplication`. Nothing else lives here — all real logic is in the packages below.
-
-### 1.2 `config/` — Application-level configuration, not business logic
 | File | Purpose |
 |---|---|
-| `SecurityConfig.kt` | Defines the `SecurityFilterChain`: which routes are public (`/api/auth/login`, Swagger), CORS policy, password encoder bean, `AuthenticationManager` bean, and wires `JwtFilter` into the filter chain. Method-level role checks (`@PreAuthorize`) live on individual controllers, not here — this file only handles authentication, not per-endpoint authorization. |
-| `SwaggerConfig.kt` | Builds the OpenAPI bean: title, description, and the `bearerAuth` security scheme used by every controller's `@SecurityRequirement`. |
-| `DataSeeder.kt` | `CommandLineRunner` that seeds demo data on startup: users (one per role), departments, suppliers, products, and a complete Purchase Request to Approval to Purchase Order to Goods Receipt workflow demonstration. Every seed method checks `repository.count() > 0` (or looks up by unique field) first, so re-running the app never creates duplicates. |
+| `ProcurementApplication.kt` | `@SpringBootApplication` entry point. Nothing else lives here. |
+| `build.gradle.kts` | Dependencies, plugins, JVM target. No new dependencies were added for Phases 7-18 (see README §3). |
+| `settings.gradle.kts`, `gradle.properties` | Gradle project metadata. |
+| `.env.example` | Template for `MONGODB_URI`, `JWT_SECRET`, `UPLOAD_DIR`, etc. |
+| `postman_collection.json` | Every endpoint across all 18 phases, organized into 20 folders. |
+| `README.md`, `FRONTEND_HANDOFF.md`, `SYSTEM_REPOTREE.md` | The three documentation files. |
 
-### 1.3 `controller/` — REST endpoints only
-Every controller follows the same shape: `@RestController`, `@RequestMapping("/api/...")`, `@Tag` for Swagger grouping, `@SecurityRequirement(name = "bearerAuth")` at the class level, and `@PreAuthorize` per method for role enforcement. Controllers never contain business logic — they validate (`@Valid`), delegate to exactly one service method, and wrap the result in a `ResponseEntity` with the correct HTTP status.
+### 1.1 `config/` — application-level wiring, not business logic
 
-| Controller | Phase | Base path |
+| File | Responsibility | Relationships |
 |---|---|---|
-| `AuthController.kt` | 1 | `/api/auth` |
-| `UserController.kt` | 1 | `/api/users` |
-| `ProductController.kt` | 1 (extended in 2) | `/api/products` |
-| `InventoryController.kt` | 1 | `/api/inventory` |
-| `StockIssueController.kt` | 1 | `/api/issues` |
-| `DashboardController.kt` | 1 (extended in 2-6) | `/api/dashboard` |
-| `SupplierController.kt` | 2 | `/api/suppliers` |
-| `DepartmentController.kt` | 3 | `/api/departments` |
-| `PurchaseRequestController.kt` | 3 | `/api/purchase-requests` |
-| `ApprovalController.kt` | 4 | `/api/approvals` |
-| `PurchaseOrderController.kt` | 5 | `/api/purchase-orders` |
-| `GoodsReceiptController.kt` | 6 | `/api/goods-receipts` |
+| `SecurityConfig.kt` | `SecurityFilterChain`: public routes (`/api/auth/login`, Swagger), CORS, password encoder bean, `AuthenticationManager` bean, wires `JwtFilter`. | Depends on `CustomUserDetailsService`, `JwtFilter`. Per-endpoint role checks live in controllers via `@PreAuthorize`, not here. |
+| `SwaggerConfig.kt` | OpenAPI bean: title, description, `bearerAuth` scheme used by every controller. | None. |
+| `DataSeeder.kt` | `CommandLineRunner`. Seeds, in order: users (5 roles) → departments → department budgets → categories (3 main + 3 sub) → suppliers → products (linked to category+supplier) → a full PR→Approval→PO→GRN demo workflow. Every method is idempotent (checks `count() > 0` or looks up by unique field first). | Depends on nearly every repository; the only place in the codebase that constructs entities across every module at once. |
 
-### 1.4 `service/` — All business logic
-This is where every rule in the system actually lives: validation beyond simple field checks, workflow transitions, calculations, and cross-entity coordination. Services depend on repositories and on each other (never the reverse, and never a circular dependency between two services).
+### 1.2 `controller/` — 24 REST controllers, one per resource family
 
-| Service | Depends on (other services) | Core responsibility |
+Every controller: `@RestController`, `@RequestMapping("/api/...")`, `@Tag` (Swagger), `@SecurityRequirement(name = "bearerAuth")`, `@PreAuthorize` per method. No business logic — validate (`@Valid`), call one service method, wrap in `ResponseEntity`.
+
+| Controller | Phase | Base path | Key methods |
+|---|---|---|---|
+| `AuthController` | 1 | `/api/auth` | `login` |
+| `UserController` | 1 | `/api/users` | CRUD |
+| `ProductController` | 1, ext. 2/9/14/15 | `/api/products` | CRUD, `getProductsPage` (Phase 15) |
+| `InventoryController` | 1 | `/api/inventory` | status views, procurement recommendations |
+| `StockIssueController` | 1 | `/api/issues` | issue, return |
+| `DashboardController` | 1, ext. 2-18 | `/api/dashboard` | `getDashboardStatistics` |
+| `SupplierController` | 2, ext. 14/15 | `/api/suppliers` | CRUD, activate/deactivate, search, `getSuppliersPage` |
+| `SupplierPerformanceController` | 12 | `/api/suppliers/{id}/performance` | `getPerformance` |
+| `DepartmentController` | 3 | `/api/departments` | CRUD |
+| `PurchaseRequestController` | 3, ext. 14/15 | `/api/purchase-requests` | CRUD, submit, cancel, search, `getRequestsPage` |
+| `ApprovalController` | 4 | `/api/approvals` | per-level decision endpoints, override, history |
+| `PurchaseOrderController` | 5, ext. 14/15 | `/api/purchase-orders` | create-from-request, issue, mark-email-sent, cancel, `getOrdersPage` |
+| `GoodsReceiptController` | 6 | `/api/goods-receipts` | create, list, list-by-PO |
+| `CategoryController` | 9 | `/api/categories` | CRUD, activate/deactivate, search, statistics |
+| `NotificationController` | 8 | `/api/notifications` | list, unread, unread-count, mark-read, mark-all-read |
+| `AttachmentController` | 10 | `/api/attachments` | upload, metadata, download, delete |
+| `BudgetController` | 11 | `/api/budgets` | list, get-by-department, create-or-update |
+| `AnalyticsController` | 13 | `/api/dashboard/charts` | 10 chart-data endpoints |
+| `ReportController` | 7 | `/api/reports` | 10 report endpoints, each JSON or CSV |
+| `AuditLogController` | 18 | `/api/audit-logs` | list, search |
+
+### 1.3 `service/` — 23 services, all business logic lives here
+
+| Service | Depends on (services) | Responsibility |
 |---|---|---|
-| `AuthService.kt` | - | Authenticates credentials via Spring Security, issues JWT |
-| `UserService.kt` | - | User CRUD, password hashing |
-| `ProductService.kt` | `SupplierService` | Product CRUD; validates `supplierId` exists; embeds `SupplierSummary` in responses |
-| `InventoryService.kt` | - | Read-only views over Product stock/status; procurement recommendations |
-| `StockIssueService.kt` | `ProductService` | Issues/returns stock to employees (the only module that decreases stock) |
-| `DashboardService.kt` | - (reads repositories directly) | Aggregates statistics across every module |
-| `SupplierService.kt` | - | Supplier CRUD, auto-generated codes, activation/deactivation, search |
-| `DepartmentService.kt` | - | Department CRUD |
-| `PurchaseRequestService.kt` | `ProductService` | PR CRUD, auto PR numbers, submit/cancel, the `FINANCE_APPROVAL_THRESHOLD` constant |
-| `ApprovalService.kt` | `PurchaseRequestService` | Approval decisions, workflow-level advancement, ADMIN override, history |
-| `PurchaseOrderService.kt` | `PurchaseRequestService`, `ProductService`, `SupplierService` | Converts approved PRs into POs, computes totals, status lifecycle, timeline |
-| `GoodsReceiptService.kt` | `PurchaseOrderService`, `ProductService` | The only service that increases `Product.currentStock`. Records receipts, updates PO received quantities, closes POs |
+| `AuthService` | - | Authenticate, issue JWT |
+| `UserService` | - | User CRUD, password hashing |
+| `ProductService` | `SupplierService`, `CategoryService` | Product CRUD, category+supplier validation, soft delete (Phase 16), pagination (Phase 15) |
+| `CategoryService` | - | Category CRUD, hierarchy assembly, soft delete |
+| `InventoryService` | - | Read-only stock views, procurement recommendations |
+| `StockIssueService` | `ProductService`, `NotificationService` | Issue/return stock; triggers low/out-of-stock notifications |
+| `SupplierService` | `NotificationService`, `AuditLogService` | Supplier CRUD, soft delete, deactivation notification+audit |
+| `SupplierPerformanceService` | `SupplierService` | Computes scorecards from `PurchaseOrderRepository`+`GoodsReceiptRepository` — nothing stored, nothing editable |
+| `DepartmentService` | - | Department CRUD, soft delete |
+| `BudgetService` | `DepartmentService` | Reserve (on PR approval)/spend (on PO completion)/exceeded-check; never lets an API consumer set reserved/spent directly |
+| `PurchaseRequestService` | `ProductService`, `NotificationService`, `AuditLogService` | PR CRUD, PR-number generation, timeline (Phase 17), duplicate detection, approver notification broadcast |
+| `ApprovalService` | `PurchaseRequestService`, `BudgetService`, `NotificationService`, `AuditLogService` | Workflow advancement, mandatory rejection reason, budget-aware Finance escalation, ADMIN override |
+| `PurchaseOrderService` | `PurchaseRequestService`, `ProductService`, `SupplierService`, `NotificationService`, `AuditLogService` | Converts approved PR to PO, totals calculation, status timeline, pagination |
+| `GoodsReceiptService` | `PurchaseOrderService`, `PurchaseRequestService`, `ProductService`, `BudgetService`, `NotificationService`, `AuditLogService` | **The only service that increases `Product.currentStock`.** Also triggers `BudgetService.spend` on PO completion |
+| `DashboardService` | - (reads repositories directly) | Aggregates every module's statistics into one response |
+| `AnalyticsService` | - (reads repositories directly) | Chart-ready datasets (Phase 13) |
+| `ReportService` | - (reads repositories directly) | Reusable report generation (Phase 7); one method per report, shared `ReportFilter` |
+| `NotificationService` | - | Persists/retrieves notifications; deliberately delivery-mechanism-agnostic (Phase 8) |
+| `AuditLogService` | - | Persists/searches audit entries; reads the actor from `SecurityContextHolder` (Phase 18) |
+| `AttachmentService` | - | Local-disk file storage + MongoDB metadata, storage mechanism isolated behind its public API (Phase 10) |
 
-### 1.5 `repository/` — Spring Data MongoDB interfaces
-Thin interfaces extending `MongoRepository<T, String>` with derived query methods (`findByX`, `existsByX`, `countByX`). No logic here — Spring Data generates the implementation.
+### 1.4 `repository/` — 18 Spring Data MongoDB interfaces
 
-| Repository | Collection |
-|---|---|
-| `UserRepository.kt` | `users` |
-| `ProductRepository.kt` | `products` |
-| `StockIssueRepository.kt` | `stockIssues` |
-| `SupplierRepository.kt` | `suppliers` |
-| `DepartmentRepository.kt` | `departments` |
-| `PurchaseRequestRepository.kt` | `purchaseRequests` |
-| `ApprovalHistoryRepository.kt` | `approvalHistories` |
-| `PurchaseOrderRepository.kt` | `purchaseOrders` |
-| `GoodsReceiptRepository.kt` | `goodsReceipts` |
+Thin `MongoRepository<T, String>` extensions with derived query methods only — no logic.
 
-### 1.6 `model/` — MongoDB documents (the persistence layer's shape)
+| Repository | Collection | Added |
+|---|---|---|
+| `UserRepository` | `users` | Phase 1, `findByRole` added Phase 8 |
+| `ProductRepository` | `products` | Phase 1 |
+| `StockIssueRepository` | `stockIssues` | Phase 1 |
+| `SupplierRepository` | `suppliers` | Phase 2 |
+| `DepartmentRepository` | `departments` | Phase 3 |
+| `PurchaseRequestRepository` | `purchaseRequests` | Phase 3 |
+| `ApprovalHistoryRepository` | `approvalHistories` | Phase 4 |
+| `PurchaseOrderRepository` | `purchaseOrders` | Phase 5 |
+| `GoodsReceiptRepository` | `goodsReceipts` | Phase 6 |
+| `CategoryRepository` | `categories` | Phase 9 |
+| `NotificationRepository` | `notifications` | Phase 8 |
+| `AttachmentRepository` | `attachments` | Phase 10 |
+| `DepartmentBudgetRepository` | `departmentBudgets` | Phase 11 |
+| `AuditLogRepository` | `auditLogs` | Phase 18 |
+
+### 1.5 `model/` — MongoDB documents
+
 | File | Notes |
 |---|---|
-| `User.kt`, `Role.kt` | `Role` has 5 values: `ADMIN`, `STORE_MANAGER`, `PROCUREMENT_MANAGER`, `FINANCE_MANAGER`, `EMPLOYEE` |
-| `Product.kt`, `ProductStatus.kt` | `Product.supplierId` (Phase 2) links to `Supplier`; `deriveStatus()` companion function computes `IN_STOCK`/`LOW_STOCK`/`OUT_OF_STOCK` |
-| `StockIssue.kt`, `IssueStatus.kt` | Records who has what stock currently issued |
-| `Supplier.kt`, `SupplierStatus.kt` | Supplier master data |
-| `Department.kt` | Simple master-data entity used by Purchase Requests |
-| `PurchaseRequest.kt` + `PurchaseRequestItem.kt` (embedded) + `PurchaseRequestStatus.kt` + `Priority.kt` | `items` is an embedded list — a snapshot of requested products, independent of later Product changes. `currentApprovalLevel: ApprovalLevel?` tracks workflow position |
-| `ApprovalHistory.kt` + `ApprovalLevel.kt` + `ApprovalDecision.kt` | One document per decision — an append-only audit trail, never updated after creation |
-| `PurchaseOrder.kt` + `PurchaseOrderItem.kt` (embedded, computed `lineSubtotal`/`lineTax`/`lineTotal`) + `PurchaseOrderTimelineEntry.kt` (embedded) + `PurchaseOrderStatus.kt` | `PurchaseOrderItem.receivedQuantity` accumulates across multiple Goods Receipts, enabling partial delivery tracking |
-| `GoodsReceipt.kt` + `GoodsReceiptItem.kt` (embedded, computed `acceptedQuantity`) + `GoodsReceiptStatus.kt` + `InspectionStatus.kt` | One document per delivery event; supports multiple GRNs per PO |
+| `User.kt`, `Role.kt` | 5 roles: `ADMIN`, `STORE_MANAGER`, `PROCUREMENT_MANAGER`, `FINANCE_MANAGER`, `EMPLOYEE` |
+| `Product.kt`, `ProductStatus.kt` | `categoryId` (Phase 9, replaces old free-text), `sku`/`barcode`/`unitOfMeasure`/`currency`/`imageUrl`, `deleted` (Phase 16) |
+| `Category.kt` | Self-referencing `parentCategoryId: String?` gives a two-level hierarchy; `deleted` flag |
+| `StockIssue.kt`, `IssueStatus.kt` | Unchanged since Phase 1 |
+| `Supplier.kt`, `SupplierStatus.kt` | `deleted` flag added Phase 16 |
+| `Department.kt` | `deleted` flag added Phase 16 |
+| `DepartmentBudget.kt` | One per department per fiscal year; computed properties `remainingAmount`/`availableAmount`/`utilizationPercentage` |
+| `PurchaseRequest.kt` + `PurchaseRequestItem.kt` + `PurchaseRequestTimelineEntry.kt` + `PurchaseRequestStatus.kt` + `Priority.kt` | `timeline: List<PurchaseRequestTimelineEntry>` added Phase 17 |
+| `ApprovalHistory.kt` + `ApprovalLevel.kt` + `ApprovalDecision.kt` | Append-only audit trail, unchanged since Phase 4 |
+| `PurchaseOrder.kt` + `PurchaseOrderItem.kt` + `PurchaseOrderTimelineEntry.kt` + `PurchaseOrderStatus.kt` | Unchanged since Phase 5/6 |
+| `GoodsReceipt.kt` + `GoodsReceiptItem.kt` + `GoodsReceiptStatus.kt` + `InspectionStatus.kt` | Unchanged since Phase 6 |
+| `Notification.kt`, `NotificationType.kt` | Phase 8 |
+| `Attachment.kt`, `AttachmentOwnerType.kt`, `AttachmentDocumentType.kt` | Phase 10; `storagePath` is an opaque local-disk path today |
+| `AuditLog.kt`, `AuditAction.kt` | Phase 18 |
 
-### 1.7 `dto/` — Request/response shapes, one subfolder per module
-DTOs never leak MongoDB `@Id`/annotations to the API surface, and never let the API dictate internal model shape. Every subfolder mirrors its model's module:
+### 1.6 `dto/` — one subfolder per module
 
-| Subfolder | Key types |
-|---|---|
-| `auth/` | `LoginRequest`, `LoginResponse` |
-| `user/` | `UserRequest`, `UserResponse` |
-| `product/` | `ProductRequest` (requires `supplierId`), `ProductResponse` (embeds `SupplierSummary`) |
-| `inventory/` | `InventoryResponse`, `ProcurementRecommendationResponse` |
-| `issue/` | `IssueRequest`, `IssueResponse` |
-| `dashboard/` | `DashboardResponse` (grown every phase — see README section 15), `TopSupplierResponse` |
-| `supplier/` | `SupplierRequest`, `SupplierUpdateRequest`, `SupplierResponse`, `SupplierSummary` (embedded in `ProductResponse`), `SupplierSearchResponse`, `SupplierStatisticsResponse`, `SupplierStatusUpdateRequest` |
-| `department/` | `DepartmentRequest`, `DepartmentResponse` |
-| `purchaserequest/` | `PurchaseRequestRequest`, `PurchaseRequestUpdateRequest`, `PurchaseRequestResponse`, `PurchaseRequestItemRequest`, `PurchaseRequestItemResponse` |
-| `approval/` | `ApprovalDecisionRequest`, `ApprovalHistoryResponse` |
-| `purchaseorder/` | `PurchaseOrderCreateRequest`, `PurchaseOrderItemInput`, `PurchaseOrderResponse`, `PurchaseOrderItemResponse`, `PurchaseOrderTimelineEntryResponse` |
-| `goodsreceipt/` | `GoodsReceiptCreateRequest`, `GoodsReceiptItemInput`, `GoodsReceiptResponse`, `GoodsReceiptItemResponse` |
-| `common/` | `ErrorResponse` (used by `GlobalExceptionHandler` for every error), `PagedResponse<T>` (reserved for future paginated endpoints) |
+| Subfolder | Key types | Phase |
+|---|---|---|
+| `auth/` | `LoginRequest`, `LoginResponse` | 1 |
+| `user/` | `UserRequest`, `UserResponse` | 1 |
+| `product/` | `ProductRequest` (now `categoryId`+SKU/barcode/UoM/currency/image), `ProductResponse` (embeds `CategorySummary`+`SupplierSummary`+`stockValue`) | 1, ext. 9 |
+| `category/` | `CategoryRequest`, `CategoryResponse` (nested `subcategories`), `CategorySummary`, `CategoryStatisticsResponse` | 9 |
+| `inventory/` | `InventoryResponse`, `ProcurementRecommendationResponse` | 1 |
+| `issue/` | `IssueRequest`, `IssueResponse` | 1 |
+| `supplier/` | `SupplierRequest`/`Update`, `SupplierResponse`, `SupplierSummary`, `SupplierSearchResponse`, `SupplierStatisticsResponse`, `SupplierStatusUpdateRequest` | 2 |
+| `supplierperformance/` | `SupplierPerformanceResponse` | 12 |
+| `department/` | `DepartmentRequest`, `DepartmentResponse` | 3 |
+| `budget/` | `DepartmentBudgetRequest`, `DepartmentBudgetResponse` | 11 |
+| `purchaserequest/` | `PurchaseRequestRequest`/`UpdateRequest`, `PurchaseRequestResponse` (now includes `timeline`), item DTOs, `PurchaseRequestTimelineEntryResponse` | 3, ext. 17 |
+| `approval/` | `ApprovalDecisionRequest`, `ApprovalHistoryResponse` | 4 |
+| `purchaseorder/` | `PurchaseOrderCreateRequest`, `PurchaseOrderResponse`, item/timeline DTOs | 5 |
+| `goodsreceipt/` | `GoodsReceiptCreateRequest`, `GoodsReceiptResponse`, item DTOs | 6 |
+| `notification/` | `NotificationResponse`, `NotificationCountResponse` | 8 |
+| `attachment/` | `AttachmentResponse` | 10 |
+| `report/` | `ReportFilter`, `ReportResult<T>`, one `*ReportRow` per report | 7 |
+| `analytics/` | `ChartDataPoint`, `TopProductResponse`, `DepartmentSpendingChartResponse` | 13 |
+| `audit/` | `AuditLogResponse` | 18 |
+| `dashboard/` | `DashboardResponse` (grown every phase), `TopSupplierResponse` | 1, ext. every phase |
+| `common/` | `ErrorResponse`, `PagedResponse<T>` (Phase 15) | 1, 15 |
 
-### 1.8 `security/` — Authentication mechanics (unchanged since Phase 1)
+### 1.7 `security/` — unchanged since Phase 1
+
 | File | Purpose |
 |---|---|
-| `JwtProvider.kt` | Generates and validates signed JWTs; extracts claims (`userId`, `role`, email as subject) |
-| `JwtFilter.kt` | `OncePerRequestFilter` — runs on every request, validates the Bearer token, populates `SecurityContextHolder` |
-| `UserPrincipal.kt` | Implements `UserDetails`; carries `id`, `role`, `firstName`, `lastName` so services can read the current actor via `SecurityContextHolder` without a database round-trip |
-| `CustomUserDetailsService.kt` | Loads a `User` by email and wraps it in a `UserPrincipal` for Spring Security |
+| `JwtProvider.kt` | Generate/validate signed JWTs; extract claims |
+| `JwtFilter.kt` | Runs once per request, populates `SecurityContextHolder` |
+| `UserPrincipal.kt` | `UserDetails` implementation carrying `id`/`role`/`firstName`/`lastName`; every service that needs "who is calling right now" reads this via `SecurityContextHolder` |
+| `CustomUserDetailsService.kt` | Loads `User` by email for Spring Security |
 
-### 1.9 `exception/` — Centralized error handling (unchanged since Phase 1, reused by every new module)
+### 1.8 `exception/` — unchanged since Phase 1, reused by every module
+
+| File | HTTP status | Used for |
+|---|---|---|
+| `GlobalExceptionHandler.kt` | - | `@RestControllerAdvice`, maps every exception to `ErrorResponse` |
+| `ResourceNotFoundException.kt` | 404 | Any `getXEntityById` miss, including soft-deleted lookups |
+| `BusinessException.kt` | 409 | Every workflow/business rule violation across all 18 phases |
+| `ValidationException.kt` | 400 | Reserved for hand-rolled validation beyond Bean Validation |
+| `UnauthorizedException.kt` | 401 | Reserved for custom auth failures |
+
+### 1.9 `util/` — new in Phase 7/15
+
 | File | Purpose |
 |---|---|
-| `GlobalExceptionHandler.kt` | `@RestControllerAdvice` mapping every exception type to a standardized `ErrorResponse` and HTTP status |
-| `ResourceNotFoundException.kt` | to 404. Thrown by every service's `getXEntityById` when an id doesn't exist |
-| `BusinessException.kt` | to 409. Thrown for every workflow/business rule violation across all 6 phases (duplicate supplier, wrong approval level, insufficient stock, over-receiving, etc.) |
-| `ValidationException.kt` | to 400. Reserved for validation failures not already caught by Bean Validation |
-| `UnauthorizedException.kt` | to 401. Reserved for custom auth failures beyond Spring Security's own handling |
+| `CsvWriter.kt` | Dependency-free CSV generation used by `ReportController` (Phase 7) |
+| `PaginationUtil.kt` | In-memory sort+paginate helper shared by `ProductService`, `SupplierService`, `PurchaseRequestService`, `PurchaseOrderService` (Phase 15) |
 
-### 1.10 `resources/` — Spring configuration
+### 1.10 `resources/`
+
 | File | Purpose |
 |---|---|
-| `application.yml` | Base config: Mongo URI, server port, JWT secret/expiry, Swagger paths, active profile |
-| `application-dev.yml` | Local development overrides (verbose logging) |
-| `application-prod.yml` | Production overrides (Mongo URI must come from environment, minimal error detail in responses) |
+| `application.yml` | Mongo URI, port, JWT secret/expiry, `app.upload-dir` (Phase 10), Swagger paths |
+| `application-dev.yml` | Verbose logging override |
+| `application-prod.yml` | Production overrides (env-only Mongo URI, minimal error detail) |
 
-### 1.11 How a request flows through these folders (end-to-end example)
-`POST /api/goods-receipts/purchase-order/{poId}` (recording a delivery):
-1. `JwtFilter` (security/) validates the token, populates `SecurityContextHolder`.
-2. `GoodsReceiptController` (controller/) checks `@PreAuthorize`, validates `GoodsReceiptCreateRequest` (dto/goodsreceipt/), calls `GoodsReceiptService`.
-3. `GoodsReceiptService` (service/) loads the `PurchaseOrder` via `PurchaseOrderService`, validates status and quantities, loads and updates each `Product` via `ProductService` (model/, repository/), builds and saves a `GoodsReceipt`, updates and saves the `PurchaseOrder`.
-4. Any rule violation throws `BusinessException` or `ResourceNotFoundException` (exception/), caught by `GlobalExceptionHandler` and returned as a standardized `ErrorResponse` (dto/common/).
-5. On success, the controller returns `201 Created` with a `GoodsReceiptResponse`.
+### 1.11 End-to-end request example (Phase 11 budget reservation)
+
+`POST /api/approvals/{prId}/procurement-manager` with `{ decision: APPROVED }`, where this is the final required approval level:
+1. `JwtFilter` validates the token.
+2. `ApprovalController` checks `@PreAuthorize`, calls `ApprovalService.decide(...)`.
+3. `ApprovalService` loads the `PurchaseRequest` (via `PurchaseRequestService`), validates the decision is legal, asks `BudgetService.isBudgetExceeded(...)` to decide whether Finance is still required, determines this is the final stage, sets `status = APPROVED`.
+4. `ApprovalService` calls `BudgetService.reserve(department, estimatedTotal)` — `BudgetService` loads the department's `DepartmentBudget` (via `DepartmentBudgetRepository`) and increments `reservedAmount`.
+5. `ApprovalService` calls `AuditLogService.log(...)` and `NotificationService.notify(...)` (the requesting employee).
+6. Controller returns `200` with the `ApprovalHistoryResponse`.
+
+Later, `POST /api/goods-receipts/purchase-order/{poId}` that fully completes the resulting PO calls `BudgetService.spend(department, reservedAmountToRelease, actualAmountSpent)`, moving that same amount from `reservedAmount` to `spentAmount`.
 
 ---
 
 ## PART 2 — FRONTEND (recommended structure)
 
-The frontend is not yet built by this handoff — this section documents the recommended structure so a frontend developer's file layout stays consistent with the backend's module boundaries.
+Not yet built by this handoff. Structure recommended so a frontend developer's layout stays 1:1 with backend module boundaries.
 
 ```
 frontend/
-├── index.html, login.html, dashboard.html, products.html, inventory.html,
-│   issues.html, users.html, suppliers.html, supplier-form.html,
-│   departments.html, purchase-requests.html, purchase-request-form.html,
-│   approvals.html, purchase-orders.html, purchase-order-form.html,
-│   goods-receipts.html, goods-receipt-form.html
-│       One page per screen in the hierarchy documented in FRONTEND_HANDOFF.md section 4.
-│
-├── assets/
-│   ├── images/     Logo, avatars
-│   ├── icons/       One icon per nav item (inventory, users, dashboard, suppliers,
-│   │                 departments, purchase-requests, approvals, purchase-orders, goods-receipts)
-│   └── fonts/
-│
-├── css/            One stylesheet per page, plus global.css for shared tokens
-│                    (colors, spacing, status-badge palette from FRONTEND_HANDOFF.md section 6)
-│
-├── js/
-│   ├── config/apiConfig.js        Base URL, shared fetch wrapper
-│   ├── auth/                      login.js, logout.js, authGuard.js, roleGuard.js
-│   │                              (roleGuard.js now checks 5 roles, not 3)
-│   ├── api/                       One file per backend module, mirroring dto/ subfolders:
-│   │   ├── authApi.js, productApi.js, inventoryApi.js, issueApi.js, userApi.js, dashboardApi.js
-│   │   ├── supplierApi.js                    (Phase 2)
-│   │   ├── departmentApi.js                  (Phase 3)
-│   │   ├── purchaseRequestApi.js              (Phase 3)
-│   │   ├── approvalApi.js                     (Phase 4)
-│   │   ├── purchaseOrderApi.js                (Phase 5)
-│   │   └── goodsReceiptApi.js                 (Phase 6)
-│   ├── pages/                     One controller module per page, matching the .html files above
-│   ├── components/                navbar.js, sidebar.js, modal.js, table.js, alerts.js,
-│   │                               supplierDropdown.js, productDropdown.js, departmentDropdown.js,
-│   │                               statusBadge.js, approvalTimeline.js, poTimeline.js
-│   └── utils/                     helpers.js, constants.js (status enums, role list, badge colors),
-│                                   validators.js, dateUtils.js
-│
+├── src/
+│   ├── api/                  one file per backend controller (see FRONTEND_HANDOFF.md §6 table)
+│   ├── components/
+│   │   ├── common/            Table, Modal, Pagination, StatusBadge, ConfirmDialog, Toast,
+│   │   │                      EmptyState, LoadingSkeleton, FilterBar, DateRangePicker
+│   │   ├── layout/             AppShell, Sidebar, Navbar, NotificationBell, RoleGuard
+│   │   ├── charts/              ChartCard (Dashboard + Analytics pages both reuse this)
+│   │   └── domain/              ApprovalTimeline, PurchaseOrderTimeline, AttachmentList,
+│   │                            AttachmentUploader, BudgetUtilizationBar, CategoryTree,
+│   │                            SupplierDropdown, ProductDropdown, DepartmentDropdown
+│   ├── pages/                 Login, Dashboard, Products, Categories, Inventory, Issues,
+│   │                          Suppliers, Departments, Budgets, PurchaseRequests, Approvals,
+│   │                          PurchaseOrders, GoodsReceipts, Reports, Analytics,
+│   │                          Notifications, AuditLogs, Users — one folder each,
+│   │                          List/Detail/Form subcomponents as needed
+│   ├── hooks/                  useAuth, usePagination, useNotifications, useDebouncedSearch
+│   ├── context/                 AuthContext, NotificationContext
+│   └── utils/                   constants, validators, dateUtils, csvDownload
 └── README.md
 ```
 
-### Frontend-to-backend module mapping
-| Frontend `js/api/*.js` | Backend controller | Backend DTOs it must know about |
-|---|---|---|
-| `authApi.js` | `AuthController` | `LoginRequest`/`LoginResponse` |
-| `productApi.js` | `ProductController` | `ProductRequest`/`ProductResponse` (embeds `SupplierSummary`) |
-| `supplierApi.js` | `SupplierController` | `SupplierRequest`/`SupplierUpdateRequest`/`SupplierResponse`/`SupplierSearchResponse`/`SupplierStatisticsResponse` |
-| `departmentApi.js` | `DepartmentController` | `DepartmentRequest`/`DepartmentResponse` |
-| `purchaseRequestApi.js` | `PurchaseRequestController` | `PurchaseRequestRequest`/`PurchaseRequestUpdateRequest`/`PurchaseRequestResponse` |
-| `approvalApi.js` | `ApprovalController` | `ApprovalDecisionRequest`/`ApprovalHistoryResponse` |
-| `purchaseOrderApi.js` | `PurchaseOrderController` | `PurchaseOrderCreateRequest`/`PurchaseOrderResponse` |
-| `goodsReceiptApi.js` | `GoodsReceiptController` | `GoodsReceiptCreateRequest`/`GoodsReceiptResponse` |
-| `dashboardApi.js` | `DashboardController` | `DashboardResponse` |
-
-Keeping this 1:1 mapping between `js/api/*.js` files and backend controllers is what lets a frontend developer find the right file instantly when a backend endpoint changes.
+Full page-by-page and component-level guidance lives in `FRONTEND_HANDOFF.md` §§4-6 — this file only maps structure, not behavior.
 
 ---
 
-## PART 3 — File Relationship Summary (the short version)
+## PART 3 — Relationship Summary
 
-- **model** defines what's stored, **repository** stores/retrieves it, **service** enforces the rules around it, **controller** exposes it over HTTP, **dto** shapes what crosses that HTTP boundary, **security** decides who's allowed to make the request at all, **exception** catches everything that goes wrong along the way and standardizes it.
-- Every new phase (3 through 6) added exactly one new row to each of these seven folders — no existing file's responsibility changed; only `Product`, `ProductRequest`, `ProductResponse`, `ProductService`, and `DashboardResponse`/`DashboardService` were extended in place to link in the new modules (supplier reference, dashboard metrics).
-- The one deliberate architectural rule enforced across the whole codebase: only `GoodsReceiptService` ever increases `Product.currentStock`. Anyone extending this system (e.g. adding a "Stock Adjustment" or "Return to Supplier" module) must preserve that invariant or explicitly document why a new exception is justified.
+- **model** defines what's stored → **repository** stores/retrieves it → **service** enforces every rule → **controller** exposes it over HTTP → **dto** shapes the HTTP boundary → **security** gates who may call it → **exception** standardizes everything that goes wrong → **util** holds small, dependency-free cross-cutting helpers (CSV, pagination) that any service can call without creating a circular dependency.
+- Cross-cutting services (`NotificationService`, `AuditLogService`, `BudgetService`) are called *into* by the workflow services (`PurchaseRequestService`, `ApprovalService`, `PurchaseOrderService`, `GoodsReceiptService`, `StockIssueService`, `SupplierService`) — never the other way around. This keeps the dependency graph a DAG with no cycles; see README §4 for the diagram.
+- The one architectural invariant preserved through all 18 phases: **only `GoodsReceiptService` increases `Product.currentStock`.** Anyone extending this system must preserve that invariant or explicitly document why a new exception is justified.

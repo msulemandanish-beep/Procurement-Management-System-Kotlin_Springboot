@@ -69,6 +69,20 @@ class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body)
     }
 
+    @ExceptionHandler(RateLimitExceededException::class)
+    fun handleRateLimitExceeded(
+        ex: RateLimitExceededException,
+        request: HttpServletRequest
+    ): ResponseEntity<ErrorResponse> {
+        val body = ErrorResponse(
+            status = HttpStatus.TOO_MANY_REQUESTS.value(),
+            error = HttpStatus.TOO_MANY_REQUESTS.reasonPhrase,
+            message = ex.message ?: "Too many requests",
+            path = request.requestURI
+        )
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(body)
+    }
+
     @ExceptionHandler(BadCredentialsException::class)
     fun handleBadCredentials(
         ex: BadCredentialsException,

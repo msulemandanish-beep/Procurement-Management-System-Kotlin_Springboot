@@ -13,6 +13,10 @@ interface SupplierRepository : MongoRepository<Supplier, String> {
     fun existsByCompanyName(companyName: String): Boolean
     fun existsByEmail(email: String): Boolean
     fun existsBySupplierCode(supplierCode: String): Boolean
+    /** Deleted-aware uniqueness checks so a soft-deleted supplier's identifiers can be reused (Phase 16 fix). */
+    fun existsByCompanyNameAndDeletedFalse(companyName: String): Boolean
+    fun existsByEmailAndDeletedFalse(email: String): Boolean
+    fun existsBySupplierCodeAndDeletedFalse(supplierCode: String): Boolean
     fun findByStatus(status: SupplierStatus): List<Supplier>
     fun searchByCompanyNameContainingIgnoreCase(keyword: String): List<Supplier>
     fun countByStatus(status: SupplierStatus): Long

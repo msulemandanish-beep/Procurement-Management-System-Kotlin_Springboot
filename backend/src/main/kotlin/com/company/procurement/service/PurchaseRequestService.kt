@@ -4,15 +4,21 @@ import com.company.procurement.dto.purchaserequest.PurchaseRequestItemRequest
 import com.company.procurement.dto.purchaserequest.PurchaseRequestItemResponse
 import com.company.procurement.dto.purchaserequest.PurchaseRequestRequest
 import com.company.procurement.dto.purchaserequest.PurchaseRequestResponse
+import com.company.procurement.dto.purchaserequest.PurchaseRequestTimelineEntryResponse
 import com.company.procurement.dto.purchaserequest.PurchaseRequestUpdateRequest
 import com.company.procurement.exception.BusinessException
 import com.company.procurement.exception.ResourceNotFoundException
 import com.company.procurement.model.ApprovalLevel
+import com.company.procurement.model.AuditAction
+import com.company.procurement.model.NotificationType
 import com.company.procurement.model.Priority
 import com.company.procurement.model.PurchaseRequest
 import com.company.procurement.model.PurchaseRequestItem
 import com.company.procurement.model.PurchaseRequestStatus
+import com.company.procurement.model.PurchaseRequestTimelineEntry
+import com.company.procurement.model.Role
 import com.company.procurement.repository.PurchaseRequestRepository
+import com.company.procurement.repository.UserRepository
 import com.company.procurement.security.UserPrincipal
 import org.slf4j.LoggerFactory
 import org.springframework.security.core.context.SecurityContextHolder
@@ -22,7 +28,10 @@ import java.time.Instant
 @Service
 class PurchaseRequestService(
     private val purchaseRequestRepository: PurchaseRequestRepository,
-    private val productService: ProductService
+    private val productService: ProductService,
+    private val userRepository: UserRepository,
+    private val notificationService: NotificationService,
+    private val auditLogService: AuditLogService
 ) {
 
     private val logger = LoggerFactory.getLogger(PurchaseRequestService::class.java)
@@ -69,9 +78,50 @@ class PurchaseRequestService(
             .toList()
     }
 
+    /**
+     * Paginated, sortable, text-searchable listing (Phase 14/15). Kept alongside
+     * the plain `getAllRequests`/`searchRequests` methods above for backward
+     * compatibility — existing frontend code calling those is unaffected.
+     */
+    fun getRequestsPage(
+        page: Int,
+        size: Int,
+        sortBy: String,
+        direction: String,
+        status: PurchaseRequestStatus?,
+        department: String?,
+        priority: Priority?,
+        search: String?
+    ): com.company.procurement.dto.common.PagedResponse<PurchaseRequestResponse> {
+        val filtered = purchaseRequestRepository.findAll()
+            .asSequence()
+            .filter { status == null || it.status == status }
+            .filter { department == null || it.department.equals(department, ignoreCase = true) }
+            .filter { priority == null || it.priority == priority }
+            .filter {
+                search.isNullOrBlank() ||
+                    it.prNumber.contains(search, ignoreCase = true) ||
+                    it.purpose.contains(search, ignoreCase = true) ||
+                    it.employeeName.contains(search, ignoreCase = true)
+            }
+            .toList()
+
+        val sortSelector: (PurchaseRequest) -> Comparable<*> = when (sortBy) {
+            "estimatedTotal" -> { r -> r.estimatedTotal }
+            "prNumber" -> { r -> r.prNumber }
+            "requiredDate" -> { r -> r.requiredDate }
+            else -> { r -> r.createdAt }
+        }
+
+        return com.company.procurement.util.PaginationUtil.paginate(filtered, page, size, sortSelector, direction) { it.toResponse() }
+    }
+
     fun createRequest(request: PurchaseRequestRequest): PurchaseRequestResponse {
         val currentUser = getCurrentUser()
         val items = buildItems(request.items)
+
+        checkForDuplicateActiveRequest(currentUser.id, request.department, items)
+
         val prNumber = generateNextPrNumber()
 
         val purchaseRequest = PurchaseRequest(
@@ -87,12 +137,22 @@ class PurchaseRequestService(
             remarks = request.remarks,
             status = PurchaseRequestStatus.DRAFT,
             currentApprovalLevel = null,
+            timeline = listOf(
+                PurchaseRequestTimelineEntry(
+                    status = PurchaseRequestStatus.DRAFT,
+                    remarks = "Purchase request created",
+                    actorId = currentUser.id,
+                    actorName = "${currentUser.firstName} ${currentUser.lastName}"
+                )
+            ),
             createdBy = currentUser.username,
             createdAt = Instant.now(),
             updatedAt = Instant.now()
         )
 
         val saved = purchaseRequestRepository.save(purchaseRequest)
+
+        auditLogService.log(AuditAction.CREATE, "PurchaseRequest", saved.id, newValue = "prNumber=${saved.prNumber}, status=DRAFT")
         logger.info("Created purchase request '{}' by '{}'", saved.prNumber, currentUser.username)
         return saved.toResponse()
     }
@@ -116,11 +176,19 @@ class PurchaseRequestService(
             requiredDate = request.requiredDate,
             remarks = request.remarks,
             estimatedTotal = items.sumOf { it.requestedQuantity * it.estimatedUnitPrice },
+            timeline = existing.timeline + PurchaseRequestTimelineEntry(
+                status = PurchaseRequestStatus.DRAFT,
+                remarks = "Purchase request edited",
+                actorId = currentUser.id,
+                actorName = "${currentUser.firstName} ${currentUser.lastName}"
+            ),
             updatedBy = currentUser.username,
             updatedAt = Instant.now()
         )
 
-        return purchaseRequestRepository.save(updated).toResponse()
+        val saved = purchaseRequestRepository.save(updated)
+        auditLogService.log(AuditAction.UPDATE, "PurchaseRequest", saved.id)
+        return saved.toResponse()
     }
 
     fun submitRequest(id: String): PurchaseRequestResponse {
@@ -131,22 +199,45 @@ class PurchaseRequestService(
         }
 
         val currentUser = getCurrentUser()
+        val actorName = "${currentUser.firstName} ${currentUser.lastName}"
 
         // Emergency-priority requests bypass the normal approval workflow entirely.
-        val (newStatus, newLevel) = if (existing.priority == Priority.EMERGENCY) {
-            PurchaseRequestStatus.APPROVED to null
+        val isEmergency = existing.priority == Priority.EMERGENCY
+        val newStatus = if (isEmergency) PurchaseRequestStatus.APPROVED else PurchaseRequestStatus.SUBMITTED
+        val newLevel = if (isEmergency) null else ApprovalLevel.STORE_MANAGER
+
+        val timelineRemark = if (isEmergency) {
+            "Submitted with EMERGENCY priority — approval workflow bypassed, auto-approved"
         } else {
-            PurchaseRequestStatus.SUBMITTED to ApprovalLevel.STORE_MANAGER
+            "Submitted for approval, awaiting Store Manager"
         }
 
         val updated = existing.copy(
             status = newStatus,
             currentApprovalLevel = newLevel,
+            timeline = existing.timeline + PurchaseRequestTimelineEntry(
+                status = newStatus, remarks = timelineRemark, actorId = currentUser.id, actorName = actorName
+            ),
             updatedBy = currentUser.username,
             updatedAt = Instant.now()
         )
 
         val saved = purchaseRequestRepository.save(updated)
+        auditLogService.log(AuditAction.SUBMIT, "PurchaseRequest", saved.id, newValue = "status=${saved.status}")
+
+        if (isEmergency) {
+            notificationService.notify(
+                recipientId = saved.employeeId,
+                type = NotificationType.APPROVAL_APPROVED,
+                title = "Emergency request auto-approved",
+                message = "Your emergency request ${saved.prNumber} bypassed the approval workflow and was auto-approved.",
+                relatedEntityType = "PurchaseRequest",
+                relatedEntityId = saved.id
+            )
+        } else {
+            notifyApproversAtLevel(saved, ApprovalLevel.STORE_MANAGER)
+        }
+
         logger.info("Submitted purchase request '{}', new status: {}", saved.prNumber, saved.status)
         return saved.toResponse()
     }
@@ -166,11 +257,19 @@ class PurchaseRequestService(
         val updated = existing.copy(
             status = PurchaseRequestStatus.CANCELLED,
             currentApprovalLevel = null,
+            timeline = existing.timeline + PurchaseRequestTimelineEntry(
+                status = PurchaseRequestStatus.CANCELLED,
+                remarks = "Purchase request cancelled",
+                actorId = currentUser.id,
+                actorName = "${currentUser.firstName} ${currentUser.lastName}"
+            ),
             updatedBy = currentUser.username,
             updatedAt = Instant.now()
         )
 
-        return purchaseRequestRepository.save(updated).toResponse()
+        val saved = purchaseRequestRepository.save(updated)
+        auditLogService.log(AuditAction.CANCEL, "PurchaseRequest", saved.id)
+        return saved.toResponse()
     }
 
     /**
@@ -183,6 +282,52 @@ class PurchaseRequestService(
 
     fun countByStatus(status: PurchaseRequestStatus): Long {
         return purchaseRequestRepository.countByStatus(status)
+    }
+
+    /** Notifies every user holding the given role that a request is awaiting their action (Phase 8). */
+    fun notifyApproversAtLevel(purchaseRequest: PurchaseRequest, level: ApprovalLevel) {
+        val role = when (level) {
+            ApprovalLevel.STORE_MANAGER -> Role.STORE_MANAGER
+            ApprovalLevel.PROCUREMENT_MANAGER -> Role.PROCUREMENT_MANAGER
+            ApprovalLevel.FINANCE_MANAGER -> Role.FINANCE_MANAGER
+            ApprovalLevel.ADMIN -> Role.ADMIN
+        }
+        val approverIds = userRepository.findByRole(role).mapNotNull { it.id }
+        notificationService.notifyMany(
+            recipientIds = approverIds,
+            type = NotificationType.APPROVAL_REQUIRED,
+            title = "Approval required",
+            message = "Purchase request ${purchaseRequest.prNumber} is awaiting your approval.",
+            relatedEntityType = "PurchaseRequest",
+            relatedEntityId = purchaseRequest.id
+        )
+    }
+
+    /**
+     * Small professional feature: warns against creating a near-identical request
+     * while an earlier one from the same employee, department, and product set is
+     * still active (not yet in a terminal state).
+     */
+    private fun checkForDuplicateActiveRequest(employeeId: String, department: String, items: List<PurchaseRequestItem>) {
+        val requestedProductIds = items.map { it.productId }.toSet()
+        val terminalStatuses = setOf(
+            PurchaseRequestStatus.REJECTED,
+            PurchaseRequestStatus.CANCELLED,
+            PurchaseRequestStatus.CONVERTED_TO_PO
+        )
+
+        val duplicate = purchaseRequestRepository.findByEmployeeId(employeeId).any { existing ->
+            existing.status !in terminalStatuses &&
+                existing.department.equals(department, ignoreCase = true) &&
+                existing.items.map { it.productId }.toSet() == requestedProductIds
+        }
+
+        if (duplicate) {
+            throw BusinessException(
+                "A similar purchase request for the same department and products is already active. " +
+                    "Please review your existing requests before creating a duplicate."
+            )
+        }
     }
 
     private fun buildItems(itemRequests: List<PurchaseRequestItemRequest>): List<PurchaseRequestItem> {
@@ -239,6 +384,11 @@ class PurchaseRequestService(
             status = this.status,
             currentApprovalLevel = this.currentApprovalLevel,
             estimatedTotal = this.estimatedTotal,
+            timeline = this.timeline.map {
+                PurchaseRequestTimelineEntryResponse(
+                    status = it.status, remarks = it.remarks, actorId = it.actorId, actorName = it.actorName, timestamp = it.timestamp
+                )
+            },
             createdBy = this.createdBy,
             updatedBy = this.updatedBy,
             createdAt = this.createdAt,

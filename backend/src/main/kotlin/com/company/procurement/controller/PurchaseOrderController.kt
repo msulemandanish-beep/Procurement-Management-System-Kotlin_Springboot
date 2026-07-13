@@ -49,6 +49,24 @@ class PurchaseOrderController(
         return ResponseEntity.ok(purchaseOrderService.getOrdersBySupplier(supplierId))
     }
 
+    @GetMapping("/page")
+    @PreAuthorize("hasAnyRole('ADMIN', 'STORE_MANAGER', 'PROCUREMENT_MANAGER', 'FINANCE_MANAGER')")
+    @Operation(
+        summary = "Get a paginated, sortable, searchable page of purchase orders",
+        description = "Phase 14/15: supports page, size, sort field (createdAt|grandTotal|poNumber|expectedDeliveryDate), direction, free-text search, and status/supplier filters"
+    )
+    fun getOrdersPage(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+        @RequestParam(defaultValue = "createdAt") sort: String,
+        @RequestParam(defaultValue = "DESC") direction: String,
+        @RequestParam(required = false) status: PurchaseOrderStatus?,
+        @RequestParam(required = false) supplierId: String?,
+        @RequestParam(required = false) search: String?
+    ): ResponseEntity<com.company.procurement.dto.common.PagedResponse<PurchaseOrderResponse>> {
+        return ResponseEntity.ok(purchaseOrderService.getOrdersPage(page, size, sort, direction, status, supplierId, search))
+    }
+
     @PostMapping("/from-request/{purchaseRequestId}")
     @PreAuthorize("hasAnyRole('ADMIN', 'PROCUREMENT_MANAGER')")
     @Operation(

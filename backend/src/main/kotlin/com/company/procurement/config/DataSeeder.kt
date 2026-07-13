@@ -3,7 +3,9 @@ package com.company.procurement.config
 import com.company.procurement.model.ApprovalDecision
 import com.company.procurement.model.ApprovalHistory
 import com.company.procurement.model.ApprovalLevel
+import com.company.procurement.model.Category
 import com.company.procurement.model.Department
+import com.company.procurement.model.DepartmentBudget
 import com.company.procurement.model.GoodsReceipt
 import com.company.procurement.model.GoodsReceiptItem
 import com.company.procurement.model.GoodsReceiptStatus
@@ -17,11 +19,14 @@ import com.company.procurement.model.PurchaseOrderTimelineEntry
 import com.company.procurement.model.PurchaseRequest
 import com.company.procurement.model.PurchaseRequestItem
 import com.company.procurement.model.PurchaseRequestStatus
+import com.company.procurement.model.PurchaseRequestTimelineEntry
 import com.company.procurement.model.Role
 import com.company.procurement.model.Supplier
 import com.company.procurement.model.SupplierStatus
 import com.company.procurement.model.User
 import com.company.procurement.repository.ApprovalHistoryRepository
+import com.company.procurement.repository.CategoryRepository
+import com.company.procurement.repository.DepartmentBudgetRepository
 import com.company.procurement.repository.DepartmentRepository
 import com.company.procurement.repository.GoodsReceiptRepository
 import com.company.procurement.repository.ProductRepository
@@ -34,6 +39,7 @@ import org.springframework.boot.CommandLineRunner
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Component
 import java.time.Instant
+import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
 
 @Component
@@ -42,6 +48,8 @@ class DataSeeder(
     private val productRepository: ProductRepository,
     private val supplierRepository: SupplierRepository,
     private val departmentRepository: DepartmentRepository,
+    private val categoryRepository: CategoryRepository,
+    private val departmentBudgetRepository: DepartmentBudgetRepository,
     private val purchaseRequestRepository: PurchaseRequestRepository,
     private val approvalHistoryRepository: ApprovalHistoryRepository,
     private val purchaseOrderRepository: PurchaseOrderRepository,
@@ -54,8 +62,10 @@ class DataSeeder(
     override fun run(vararg args: String?) {
         val users = seedUsers()
         seedDepartments()
+        seedBudgets()
+        val categoryIds = seedCategories()
         val supplierIds = seedSuppliers()
-        val products = seedProducts(supplierIds)
+        val products = seedProducts(supplierIds, categoryIds)
         seedProcurementWorkflowDemo(users, products)
     }
 
@@ -135,6 +145,90 @@ class DataSeeder(
 
         departmentRepository.saveAll(departments)
         logger.info("Seeded ${departments.size} default departments")
+    }
+
+    /**
+     * Seeds an annual budget for the main spending departments (Phase 11) for the
+     * current fiscal year, so the Budget endpoints have realistic data to show
+     * immediately. Reserved/spent amounts start at zero and are only ever moved
+     * by BudgetService as real approvals/completions happen from this point on —
+     * the completed PR-0001/PO-0001/GRN-0001 demo cycle seeded further below was
+     * inserted directly via repositories (bypassing the services), so it does not
+     * retroactively affect these starting budget figures.
+     */
+    private fun seedBudgets() {
+        if (departmentBudgetRepository.count() > 0) {
+            logger.info("Department budgets already seeded. Skipping budget seed data.")
+            return
+        }
+
+        val fiscalYear = Instant.now().atZone(ZoneOffset.UTC).year
+        val departments = departmentRepository.findAll()
+
+        val annualBudgetsByCode = mapOf(
+            "IT" to 50000.0,
+            "PROC" to 20000.0,
+            "FIN" to 15000.0,
+            "OPS" to 30000.0,
+            "HR" to 10000.0
+        )
+
+        val budgets = departments.mapNotNull { department ->
+            val annualBudget = annualBudgetsByCode[department.code] ?: return@mapNotNull null
+            DepartmentBudget(
+                departmentId = department.id ?: "",
+                departmentName = department.name,
+                fiscalYear = fiscalYear,
+                annualBudget = annualBudget
+            )
+        }
+
+        departmentBudgetRepository.saveAll(budgets)
+        logger.info("Seeded ${budgets.size} department budgets for fiscal year $fiscalYear")
+    }
+
+    /**
+     * Seeds a two-level category hierarchy (Phase 9): three main categories, two
+     * of which have subcategories. Returns a map keyed by category name so
+     * seedProducts() can assign the correct categoryId to every product.
+     */
+    private fun seedCategories(): Map<String, String> {
+        val existingCategories = categoryRepository.findAll()
+        if (existingCategories.isNotEmpty()) {
+            logger.info("Categories already seeded. Skipping category seed data.")
+            return existingCategories.associate { it.name to (it.id ?: "") }
+        }
+
+        val officeSupplies = categoryRepository.save(
+            Category(name = "Office Supplies", parentCategoryId = null, description = "Consumable office materials")
+        )
+        val itEquipment = categoryRepository.save(
+            Category(name = "IT Equipment", parentCategoryId = null, description = "Computing and networking hardware")
+        )
+        val furniture = categoryRepository.save(
+            Category(name = "Furniture", parentCategoryId = null, description = "Office furniture")
+        )
+
+        val computers = categoryRepository.save(
+            Category(name = "Computers", parentCategoryId = itEquipment.id, description = "Laptops and desktops")
+        )
+        val peripherals = categoryRepository.save(
+            Category(name = "Peripherals", parentCategoryId = itEquipment.id, description = "Monitors, drives, and accessories")
+        )
+        val officeChairs = categoryRepository.save(
+            Category(name = "Office Chairs", parentCategoryId = furniture.id, description = "Seating")
+        )
+
+        logger.info("Seeded 6 default categories (3 main, 3 sub)")
+
+        return mapOf(
+            "Office Supplies" to (officeSupplies.id ?: ""),
+            "IT Equipment" to (itEquipment.id ?: ""),
+            "Furniture" to (furniture.id ?: ""),
+            "Computers" to (computers.id ?: ""),
+            "Peripherals" to (peripherals.id ?: ""),
+            "Office Chairs" to (officeChairs.id ?: "")
+        )
     }
 
     /**
@@ -260,7 +354,7 @@ class DataSeeder(
         return idsByCompanyName
     }
 
-    private fun seedProducts(supplierIdsByCompanyName: Map<String, String>): Map<String, Product> {
+    private fun seedProducts(supplierIdsByCompanyName: Map<String, String>, categoryIdsByName: Map<String, String>): Map<String, Product> {
         val existingProducts = productRepository.findAll()
         if (existingProducts.isNotEmpty()) {
             logger.info("Products already seeded. Skipping product seed data.")
@@ -273,11 +367,20 @@ class DataSeeder(
         val computerWorld = supplierIdsByCompanyName.getValue("Computer World")
         val primeElectronics = supplierIdsByCompanyName.getValue("Prime Electronics")
 
+        val officeSuppliesCategory = categoryIdsByName.getValue("Office Supplies")
+        val computersCategory = categoryIdsByName.getValue("Computers")
+        val peripheralsCategory = categoryIdsByName.getValue("Peripherals")
+        val officeChairsCategory = categoryIdsByName.getValue("Office Chairs")
+
         val products = listOf(
             Product(
                 name = "A4 Printing Paper (Ream)",
                 description = "500 sheets of premium quality A4 printing paper",
-                category = "Office Supplies",
+                categoryId = officeSuppliesCategory,
+                sku = "OFS-PAP-001",
+                barcode = "8901234500011",
+                unitOfMeasure = "REAM",
+                currency = "USD",
                 unitPrice = 5.99,
                 currentStock = 120,
                 minimumStock = 30,
@@ -287,7 +390,11 @@ class DataSeeder(
             Product(
                 name = "Ballpoint Pens (Box of 50)",
                 description = "Blue ink ballpoint pens, box of 50",
-                category = "Office Supplies",
+                categoryId = officeSuppliesCategory,
+                sku = "OFS-PEN-002",
+                barcode = "8901234500028",
+                unitOfMeasure = "BOX",
+                currency = "USD",
                 unitPrice = 12.50,
                 currentStock = 15,
                 minimumStock = 20,
@@ -297,7 +404,11 @@ class DataSeeder(
             Product(
                 name = "Laptop - Dell Latitude 5440",
                 description = "14-inch business laptop, Intel i5, 16GB RAM, 512GB SSD",
-                category = "IT Equipment",
+                categoryId = computersCategory,
+                sku = "ITE-LAP-003",
+                barcode = "8901234500035",
+                unitOfMeasure = "EA",
+                currency = "USD",
                 unitPrice = 950.00,
                 currentStock = 0,
                 minimumStock = 5,
@@ -307,7 +418,11 @@ class DataSeeder(
             Product(
                 name = "Office Chair - Ergonomic",
                 description = "Ergonomic mesh office chair with lumbar support",
-                category = "Furniture",
+                categoryId = officeChairsCategory,
+                sku = "FUR-CHR-004",
+                barcode = "8901234500042",
+                unitOfMeasure = "EA",
+                currency = "USD",
                 unitPrice = 145.00,
                 currentStock = 40,
                 minimumStock = 10,
@@ -317,7 +432,11 @@ class DataSeeder(
             Product(
                 name = "Whiteboard Markers (Pack of 12)",
                 description = "Assorted color dry-erase whiteboard markers",
-                category = "Office Supplies",
+                categoryId = officeSuppliesCategory,
+                sku = "OFS-MRK-005",
+                barcode = "8901234500059",
+                unitOfMeasure = "PACK",
+                currency = "USD",
                 unitPrice = 8.25,
                 currentStock = 8,
                 minimumStock = 15,
@@ -327,7 +446,11 @@ class DataSeeder(
             Product(
                 name = "External Hard Drive 1TB",
                 description = "Portable USB 3.0 external hard drive, 1TB capacity",
-                category = "IT Equipment",
+                categoryId = peripheralsCategory,
+                sku = "ITE-HDD-006",
+                barcode = "8901234500066",
+                unitOfMeasure = "EA",
+                currency = "USD",
                 unitPrice = 65.00,
                 currentStock = 25,
                 minimumStock = 10,
@@ -337,7 +460,11 @@ class DataSeeder(
             Product(
                 name = "LED Monitor 24-inch",
                 description = "24-inch Full HD LED monitor with HDMI and VGA input",
-                category = "IT Equipment",
+                categoryId = peripheralsCategory,
+                sku = "ITE-MON-007",
+                barcode = "8901234500073",
+                unitOfMeasure = "EA",
+                currency = "USD",
                 unitPrice = 110.00,
                 currentStock = 18,
                 minimumStock = 6,

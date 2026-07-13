@@ -31,6 +31,23 @@ class SupplierController(
         return ResponseEntity.ok(supplierService.getAllSuppliers())
     }
 
+    @GetMapping("/page")
+    @PreAuthorize("hasAnyRole('ADMIN', 'STORE_MANAGER')")
+    @Operation(
+        summary = "Get a paginated, sortable, searchable page of suppliers",
+        description = "Phase 14/15: supports page, size, sort field (createdAt|companyName|supplierCode), direction, free-text search, and status filter"
+    )
+    fun getSuppliersPage(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+        @RequestParam(defaultValue = "createdAt") sort: String,
+        @RequestParam(defaultValue = "DESC") direction: String,
+        @RequestParam(required = false) status: com.company.procurement.model.SupplierStatus?,
+        @RequestParam(required = false) search: String?
+    ): ResponseEntity<com.company.procurement.dto.common.PagedResponse<SupplierResponse>> {
+        return ResponseEntity.ok(supplierService.getSuppliersPage(page, size, sort, direction, status, search))
+    }
+
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN', 'STORE_MANAGER')")
     @Operation(summary = "Get supplier by id", description = "Retrieve a single supplier by its id")

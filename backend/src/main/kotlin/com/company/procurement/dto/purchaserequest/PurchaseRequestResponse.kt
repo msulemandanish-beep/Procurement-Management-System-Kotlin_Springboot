@@ -20,6 +20,7 @@ data class PurchaseRequestResponse(
     val status: PurchaseRequestStatus,
     val currentApprovalLevel: ApprovalLevel?,
     val estimatedTotal: Double,
+    val timeline: List<PurchaseRequestTimelineEntryResponse> = emptyList(),
     val createdBy: String,
     val updatedBy: String?,
     val createdAt: Instant,

@@ -17,13 +17,45 @@ import java.time.Instant
 
 @Service
 class SupplierService(
-    private val supplierRepository: SupplierRepository
+    private val supplierRepository: SupplierRepository,
+    private val notificationService: NotificationService,
+    private val auditLogService: AuditLogService,
+    private val userRepository: com.company.procurement.repository.UserRepository
 ) {
 
     private val logger = LoggerFactory.getLogger(SupplierService::class.java)
 
     fun getAllSuppliers(): List<SupplierResponse> {
-        return supplierRepository.findAll().map { it.toResponse() }
+        return supplierRepository.findAll().filter { !it.deleted }.map { it.toResponse() }
+    }
+
+    /** Paginated, sortable, text-searchable listing (Phase 14/15). */
+    fun getSuppliersPage(
+        page: Int,
+        size: Int,
+        sortBy: String,
+        direction: String,
+        status: SupplierStatus?,
+        search: String?
+    ): com.company.procurement.dto.common.PagedResponse<SupplierResponse> {
+        val filtered = supplierRepository.findAll()
+            .asSequence()
+            .filter { !it.deleted }
+            .filter { status == null || it.status == status }
+            .filter {
+                search.isNullOrBlank() ||
+                    it.companyName.contains(search, ignoreCase = true) ||
+                    it.supplierCode.contains(search, ignoreCase = true)
+            }
+            .toList()
+
+        val sortSelector: (Supplier) -> Comparable<*> = when (sortBy) {
+            "companyName" -> { s -> s.companyName }
+            "supplierCode" -> { s -> s.supplierCode }
+            else -> { s -> s.createdAt }
+        }
+
+        return com.company.procurement.util.PaginationUtil.paginate(filtered, page, size, sortSelector, direction) { it.toResponse() }
     }
 
     fun getSupplierById(id: String): SupplierResponse {
@@ -118,12 +150,14 @@ class SupplierService(
         return saved.toResponse()
     }
 
+    /** Soft delete (Phase 16) — never physically removes a supplier so historical Purchase Orders stay intact. */
     fun deleteSupplier(id: String) {
-        if (!supplierRepository.existsById(id)) {
+        val supplier = getSupplierEntityById(id)
+        if (supplier.deleted) {
             throw ResourceNotFoundException("Supplier not found with id: $id")
         }
-        supplierRepository.deleteById(id)
-        logger.info("Deleted supplier with id: {}", id)
+        supplierRepository.save(supplier.copy(deleted = true, status = SupplierStatus.INACTIVE, updatedAt = Instant.now()))
+        logger.info("Soft-deleted supplier with id: {}", id)
     }
 
     fun activateSupplier(id: String): SupplierResponse {
@@ -149,19 +183,41 @@ class SupplierService(
         val updated = supplier.copy(status = SupplierStatus.INACTIVE, updatedAt = Instant.now())
         val saved = supplierRepository.save(updated)
         logger.info("Deactivated supplier '{}' (id: {})", saved.companyName, saved.id)
+
+        auditLogService.log(
+            action = com.company.procurement.model.AuditAction.DEACTIVATE,
+            module = "Supplier",
+            entityId = saved.id,
+            oldValue = "status=ACTIVE",
+            newValue = "status=INACTIVE"
+        )
+
+        val recipients = (
+            userRepository.findByRole(com.company.procurement.model.Role.ADMIN) +
+                userRepository.findByRole(com.company.procurement.model.Role.PROCUREMENT_MANAGER)
+            ).mapNotNull { it.id }
+        notificationService.notifyMany(
+            recipientIds = recipients,
+            type = com.company.procurement.model.NotificationType.SUPPLIER_DEACTIVATED,
+            title = "Supplier deactivated",
+            message = "Supplier '${saved.companyName}' (${saved.supplierCode}) has been deactivated.",
+            relatedEntityType = "Supplier",
+            relatedEntityId = saved.id
+        )
+
         return saved.toResponse()
     }
 
     fun searchSuppliers(keyword: String): List<SupplierSearchResponse> {
-        return supplierRepository.searchByCompanyNameContainingIgnoreCase(keyword).map { it.toSearchResponse() }
+        return supplierRepository.searchByCompanyNameContainingIgnoreCase(keyword).filter { !it.deleted }.map { it.toSearchResponse() }
     }
 
     fun getActiveSuppliers(): List<SupplierResponse> {
-        return supplierRepository.findByStatus(SupplierStatus.ACTIVE).map { it.toResponse() }
+        return supplierRepository.findByStatus(SupplierStatus.ACTIVE).filter { !it.deleted }.map { it.toResponse() }
     }
 
     fun getInactiveSuppliers(): List<SupplierResponse> {
-        return supplierRepository.findByStatus(SupplierStatus.INACTIVE).map { it.toResponse() }
+        return supplierRepository.findByStatus(SupplierStatus.INACTIVE).filter { !it.deleted }.map { it.toResponse() }
     }
 
     fun getStatistics(): SupplierStatisticsResponse {
@@ -202,13 +258,13 @@ class SupplierService(
     }
 
     private fun validateUniqueCompanyName(companyName: String) {
-        if (supplierRepository.existsByCompanyName(companyName)) {
+        if (supplierRepository.existsByCompanyNameAndDeletedFalse(companyName)) {
             throw BusinessException("A supplier with company name '$companyName' already exists")
         }
     }
 
     private fun validateUniqueEmail(email: String) {
-        if (supplierRepository.existsByEmail(email)) {
+        if (supplierRepository.existsByEmailAndDeletedFalse(email)) {
             throw BusinessException("A supplier with email '$email' already exists")
         }
     }

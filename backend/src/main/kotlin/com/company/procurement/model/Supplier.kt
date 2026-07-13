@@ -47,6 +47,9 @@ data class Supplier(
 
     val status: SupplierStatus = SupplierStatus.ACTIVE,
 
+    /** Soft-delete flag (Phase 16). Historical Purchase Orders retain their supplierId. */
+    val deleted: Boolean = false,
+
     val createdAt: Instant = Instant.now(),
 
     val updatedAt: Instant = Instant.now()

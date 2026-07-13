@@ -5,9 +5,11 @@ import com.company.procurement.dto.goodsreceipt.GoodsReceiptItemResponse
 import com.company.procurement.dto.goodsreceipt.GoodsReceiptResponse
 import com.company.procurement.exception.BusinessException
 import com.company.procurement.exception.ResourceNotFoundException
+import com.company.procurement.model.AuditAction
 import com.company.procurement.model.GoodsReceipt
 import com.company.procurement.model.GoodsReceiptItem
 import com.company.procurement.model.GoodsReceiptStatus
+import com.company.procurement.model.NotificationType
 import com.company.procurement.model.Product
 import com.company.procurement.model.PurchaseOrderStatus
 import com.company.procurement.model.PurchaseOrderTimelineEntry
@@ -22,7 +24,11 @@ import java.time.Instant
 class GoodsReceiptService(
     private val goodsReceiptRepository: GoodsReceiptRepository,
     private val purchaseOrderService: PurchaseOrderService,
-    private val productService: ProductService
+    private val purchaseRequestService: PurchaseRequestService,
+    private val productService: ProductService,
+    private val budgetService: BudgetService,
+    private val notificationService: NotificationService,
+    private val auditLogService: AuditLogService
 ) {
 
     private val logger = LoggerFactory.getLogger(GoodsReceiptService::class.java)
@@ -104,9 +110,10 @@ class GoodsReceiptService(
             if (receiptItem.acceptedQuantity > 0) {
                 val product = productService.getProductEntityById(receiptItem.productId)
                 val newStock = product.currentStock + receiptItem.acceptedQuantity
+                val newStatus = Product.deriveStatus(newStock, product.minimumStock)
                 val updatedProduct = product.copy(
                     currentStock = newStock,
-                    status = Product.deriveStatus(newStock, product.minimumStock),
+                    status = newStatus,
                     updatedAt = Instant.now()
                 )
                 productService.saveProduct(updatedProduct)
@@ -146,6 +153,15 @@ class GoodsReceiptService(
         )
         purchaseOrderService.saveOrder(updatedOrder)
 
+        if (allFullyReceived) {
+            val purchaseRequest = purchaseRequestService.getRequestEntityById(purchaseOrder.purchaseRequestId)
+            budgetService.spend(
+                departmentName = purchaseRequest.department,
+                reservedAmountToRelease = purchaseRequest.estimatedTotal,
+                actualAmountSpent = purchaseOrder.grandTotal
+            )
+        }
+
         val grnStatus = when {
             receiptItems.all { it.acceptedQuantity == it.receivedQuantity } -> GoodsReceiptStatus.COMPLETED
             receiptItems.all { it.acceptedQuantity == 0 } -> GoodsReceiptStatus.REJECTED
@@ -175,6 +191,23 @@ class GoodsReceiptService(
         logger.info(
             "Recorded goods receipt '{}' against purchase order '{}', new PO status: {}",
             saved.grnNumber, purchaseOrder.poNumber, newPoStatus
+        )
+
+        auditLogService.log(
+            action = AuditAction.RECEIVE,
+            module = "GoodsReceipt",
+            entityId = saved.id,
+            newValue = "grnNumber=${saved.grnNumber}, poStatus=$newPoStatus"
+        )
+
+        val purchaseRequestForNotification = purchaseRequestService.getRequestEntityById(purchaseOrder.purchaseRequestId)
+        notificationService.notify(
+            recipientId = purchaseRequestForNotification.employeeId,
+            type = NotificationType.GOODS_RECEIVED,
+            title = "Goods received",
+            message = "Goods receipt ${saved.grnNumber} was recorded against Purchase Order ${purchaseOrder.poNumber}.",
+            relatedEntityType = "GoodsReceipt",
+            relatedEntityId = saved.id
         )
 
         return saved.toResponse()

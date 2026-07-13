@@ -15,7 +15,7 @@ class DepartmentService(
 ) {
 
     fun getAllDepartments(): List<DepartmentResponse> {
-        return departmentRepository.findAll().map { it.toResponse() }
+        return departmentRepository.findAll().filter { !it.deleted }.map { it.toResponse() }
     }
 
     fun getDepartmentById(id: String): DepartmentResponse {
@@ -23,15 +23,19 @@ class DepartmentService(
     }
 
     fun getDepartmentEntityById(id: String): Department {
-        return departmentRepository.findById(id)
+        val department = departmentRepository.findById(id)
             .orElseThrow { ResourceNotFoundException("Department not found with id: $id") }
+        if (department.deleted) {
+            throw ResourceNotFoundException("Department not found with id: $id")
+        }
+        return department
     }
 
     fun createDepartment(request: DepartmentRequest): DepartmentResponse {
-        if (departmentRepository.existsByName(request.name)) {
+        if (departmentRepository.existsByNameAndDeletedFalse(request.name)) {
             throw BusinessException("A department with name '${request.name}' already exists")
         }
-        if (departmentRepository.existsByCode(request.code)) {
+        if (departmentRepository.existsByCodeAndDeletedFalse(request.code)) {
             throw BusinessException("A department with code '${request.code}' already exists")
         }
 
@@ -48,10 +52,10 @@ class DepartmentService(
     fun updateDepartment(id: String, request: DepartmentRequest): DepartmentResponse {
         val existing = getDepartmentEntityById(id)
 
-        if (!existing.name.equals(request.name, ignoreCase = true) && departmentRepository.existsByName(request.name)) {
+        if (!existing.name.equals(request.name, ignoreCase = true) && departmentRepository.existsByNameAndDeletedFalse(request.name)) {
             throw BusinessException("A department with name '${request.name}' already exists")
         }
-        if (!existing.code.equals(request.code, ignoreCase = true) && departmentRepository.existsByCode(request.code)) {
+        if (!existing.code.equals(request.code, ignoreCase = true) && departmentRepository.existsByCodeAndDeletedFalse(request.code)) {
             throw BusinessException("A department with code '${request.code}' already exists")
         }
 
@@ -66,11 +70,10 @@ class DepartmentService(
         return departmentRepository.save(updated).toResponse()
     }
 
+    /** Soft delete (Phase 16) — never physically removes a department so historical Purchase Requests stay intact. */
     fun deleteDepartment(id: String) {
-        if (!departmentRepository.existsById(id)) {
-            throw ResourceNotFoundException("Department not found with id: $id")
-        }
-        departmentRepository.deleteById(id)
+        val department = getDepartmentEntityById(id)
+        departmentRepository.save(department.copy(deleted = true, active = false, updatedAt = Instant.now()))
     }
 
     private fun Department.toResponse(): DepartmentResponse {

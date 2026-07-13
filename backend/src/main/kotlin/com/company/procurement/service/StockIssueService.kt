@@ -5,7 +5,10 @@ import com.company.procurement.dto.issue.IssueResponse
 import com.company.procurement.exception.BusinessException
 import com.company.procurement.exception.ResourceNotFoundException
 import com.company.procurement.model.IssueStatus
+import com.company.procurement.model.NotificationType
 import com.company.procurement.model.Product
+import com.company.procurement.model.ProductStatus
+import com.company.procurement.model.Role
 import com.company.procurement.model.StockIssue
 import com.company.procurement.repository.StockIssueRepository
 import com.company.procurement.repository.UserRepository
@@ -18,7 +21,8 @@ import java.time.Instant
 class StockIssueService(
     private val stockIssueRepository: StockIssueRepository,
     private val productService: ProductService,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val notificationService: NotificationService
 ) {
 
     fun getAllIssues(): List<IssueResponse> {
@@ -45,12 +49,15 @@ class StockIssueService(
 
         val currentUsername = getCurrentUsername()
 
+        val newStock = product.currentStock - request.quantity
+        val newStatus = Product.deriveStatus(newStock, product.minimumStock)
         val updatedProduct = product.copy(
-            currentStock = product.currentStock - request.quantity,
-            status = Product.deriveStatus(product.currentStock - request.quantity, product.minimumStock),
+            currentStock = newStock,
+            status = newStatus,
             updatedAt = Instant.now()
         )
         productService.saveProduct(updatedProduct)
+        notifyIfLowOrOutOfStock(updatedProduct, newStatus)
 
         val stockIssue = StockIssue(
             productId = product.id ?: "",
@@ -99,6 +106,25 @@ class StockIssueService(
         val authentication = SecurityContextHolder.getContext().authentication
         val principal = authentication?.principal
         return if (principal is UserPrincipal) principal.username else "SYSTEM"
+    }
+
+    /** Phase 8 — alerts every STORE_MANAGER and ADMIN when a product crosses into LOW_STOCK/OUT_OF_STOCK. */
+    private fun notifyIfLowOrOutOfStock(product: Product, status: ProductStatus) {
+        if (status != ProductStatus.LOW_STOCK && status != ProductStatus.OUT_OF_STOCK) return
+
+        val type = if (status == ProductStatus.OUT_OF_STOCK) NotificationType.OUT_OF_STOCK_WARNING else NotificationType.LOW_STOCK_WARNING
+        val title = if (status == ProductStatus.OUT_OF_STOCK) "Product out of stock" else "Product running low"
+        val message = "'${product.name}' is now $status (current stock: ${product.currentStock}, minimum: ${product.minimumStock})."
+
+        val recipients = (userRepository.findByRole(Role.STORE_MANAGER) + userRepository.findByRole(Role.ADMIN)).mapNotNull { it.id }
+        notificationService.notifyMany(
+            recipientIds = recipients,
+            type = type,
+            title = title,
+            message = message,
+            relatedEntityType = "Product",
+            relatedEntityId = product.id
+        )
     }
 
     private fun StockIssue.toResponse(): IssueResponse {
